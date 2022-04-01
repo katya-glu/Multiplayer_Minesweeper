@@ -53,7 +53,7 @@ class Board:
         self.game_started = False
         self.game_start_time = 0
         self.time = 0
-        self.clock_font = pygame.font.SysFont("comicsans", 30)
+        self.clock_font = pygame.font.SysFont("consolas", 20)
         self.shown_array = np.zeros(self.board_shape, dtype=int)
         self.flags_array = np.zeros(self.board_shape, dtype=int)
         self.mines_array = np.zeros(self.board_shape, dtype=int)
@@ -238,7 +238,7 @@ class Board:
             self.time = time_from_start
 
     def is_game_over(self):
-        font = pygame.font.SysFont("comicsans", 40)
+        font = pygame.font.SysFont("", 40)
         if self.hit_mine:
             self.game_over = True  # TODO: check if this is used, if not - remove
             lose_text = font.render("You lose", True, (255, 0, 0))
