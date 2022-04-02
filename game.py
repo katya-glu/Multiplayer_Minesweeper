@@ -5,6 +5,7 @@ from Board import Board
 import pygame
 import time
 import numpy as np
+import threading
 pygame.init()
 
 
@@ -21,6 +22,9 @@ num_of_tiles_x_large_board = 30
 num_of_tiles_y_large_board = 16
 num_of_mines_large_board = 99
 
+# global vars
+action_queue = []
+run = True
 
 def get_board_size(size_str):
     # function gets size_str from open_opening_window func in game_class file
@@ -86,6 +90,31 @@ def add_high_score(game_board, score, size_index):
     high_scores.add_new_high_score(score, size_index)
     game_board.add_score = False
 
+def event_consumer(game_board):
+    print('beginning of event consumer')
+    global run
+    while run:
+        if len(action_queue) != 0:
+            # get from kafka
+            # TBD
+            [action_tile_x, action_tile_y, action_left_released, action_right_released] = action_queue.pop(0)
+            # game state is updated according to the pressed button
+            if (action_left_released or action_right_released):
+                if not game_board.game_started and action_left_released and not action_right_released:
+                    game_board.game_start_time = time.time()
+                    game_board.game_started = True
+                game_board.update_game_state(action_tile_x, action_tile_y, action_left_released, action_right_released)
+
+        game_board.update_board_for_display()
+        game_board.display_game_board()
+        if game_board.add_score:
+            # TODO: fix bug - when pygame and highscore windows are open, if X is pressed in pygame win, all windows get stuck.
+            # TODO: Detect click outside window from display HS func
+            add_high_score(game_board, game_board.time, game_board.size_index)
+        game_board.is_game_over()
+        game_board.update_clock()
+        pygame.display.update()
+
 def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add comments
     #np.random.seed(1)
     game_board = Board(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines)
@@ -95,8 +124,18 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
     right_pressed = False
     LEFT = 1
     RIGHT = 3
-    run = True
+
+    # starting consumer thread for kafka use
+    consumer_thread = threading.Thread(target=event_consumer, args=[game_board])
+    consumer_thread.start()
+
+    left_released = False
+    right_released = False
+
+    global run
     while run:
+        if left_released:
+            print("clear left_released")
         left_released = False
         right_released = False
         for event in pygame.event.get():
@@ -142,27 +181,14 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
                 tile_x = tile_xy[0]
                 tile_y = tile_xy[1]
 
-                # game state is updated according to the pressed button
-                if (left_released or right_released):
-                    if not game_board.game_started and left_released and not right_released:
-                        game_board.game_start_time = time.time()
-                        game_board.game_started = True
-                    game_board.update_game_state(tile_x, tile_y, left_released, right_released)
-                    left_pressed = False
-                    right_pressed = False
+                # send to kafka
+                global action_queue
+                action_queue.append([tile_x, tile_y, left_released, right_released])
+                print('appended to moves_queue:', tile_x, tile_y, left_released, right_released)
+                left_pressed = False
+                right_pressed = False
 
-
-        game_board.update_board_for_display()
-        game_board.display_game_board()
-        if game_board.add_score:
-            # TODO: fix bug - when pygame and highscore windows are open, if X is pressed in pygame win, all windows get stuck.
-            # TODO: Detect click outside window from display HS func
-            add_high_score(game_board, game_board.time, game_board.size_index)
-        game_board.is_game_over()
-        game_board.update_clock()
-        pygame.display.update()
-
-
+    time.sleep(1)   # wait 1 sec to avoid thread crash on pygame command
     pygame.quit()
 
 
