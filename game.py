@@ -6,6 +6,9 @@ import pygame
 import time
 import numpy as np
 import threading
+from kafka import KafkaConsumer
+from kafka import KafkaProducer
+import json
 pygame.init()
 
 
@@ -90,14 +93,30 @@ def add_high_score(game_board, score, size_index):
     high_scores.add_new_high_score(score, size_index)
     game_board.add_score = False
 
+def kafka_consumer(topic_name):
+    TOPIC_NAME = topic_name
+
+    consumer = KafkaConsumer(TOPIC_NAME, value_deserializer=lambda data: json.loads(data.decode('utf-8')))
+
+    for message in consumer:
+        # message.value contains dict with pressed tile data
+        pressed_tile_data_dict = message.value
+        action_queue.append([pressed_tile_data_dict["tile_x"], pressed_tile_data_dict["tile_y"],
+                             pressed_tile_data_dict["left_released"], pressed_tile_data_dict["right_released"]])
+        print(action_queue)
+
+
 def event_consumer(game_board):
     print('beginning of event consumer')
+    # TODO: consider removing kafka thread and removing the action queue
+    kafka_consumer_thread = threading.Thread(target=kafka_consumer, args=['tiles'])
+    kafka_consumer_thread.start()
+
     global run
     while run:
         if len(action_queue) != 0:
-            # get from kafka
-            # TBD
             [action_tile_x, action_tile_y, action_left_released, action_right_released] = action_queue.pop(0)
+            print("pop from action queue")
             # game state is updated according to the pressed button
             if (action_left_released or action_right_released):
                 if not game_board.game_started and action_left_released and not action_right_released:
@@ -114,6 +133,10 @@ def event_consumer(game_board):
         game_board.is_game_over()
         game_board.update_clock()
         pygame.display.update()
+
+def get_tile_data_dict(tile_x, tile_y, left_released, right_released):
+    return {'tile_x': tile_x, 'tile_y': tile_y, 'left_released': left_released, 'right_released': right_released}
+
 
 def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add comments
     #np.random.seed(1)
@@ -134,8 +157,8 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
 
     global run
     while run:
-        if left_released:
-            print("clear left_released")
+        """if left_released:
+            print("clear left_released")"""
         left_released = False
         right_released = False
         for event in pygame.event.get():
@@ -181,10 +204,28 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
                 tile_x = tile_xy[0]
                 tile_y = tile_xy[1]
 
-                # send to kafka
+                """tile_x_str = str(tile_x)
+                tile_x_bytes = tile_x_str.encode()
+                tile_y_str = str(tile_y)
+                tile_y_bytes = tile_y_str.encode()"""
+
+                tile_data_dict = get_tile_data_dict(tile_x, tile_y, left_released, right_released)
+
+                # start kafka producer
+                TOPIC_NAME = 'tiles'
+                KAFKA_SERVER = 'localhost:9092'
+
+                producer = KafkaProducer(bootstrap_servers=KAFKA_SERVER,
+                                         value_serializer=lambda data: json.dumps(data).encode('utf-8'))
+                # TODO: test efficiency of sending bytes vs. json
+                #producer.send(TOPIC_NAME, b'tile_x: %b, tile_y: %b' % (tile_x_bytes, tile_y_bytes))
+                producer.send(TOPIC_NAME, tile_data_dict)
+                producer.flush()
+
+                # TODO: remove next 3 lines
                 global action_queue
-                action_queue.append([tile_x, tile_y, left_released, right_released])
-                print('appended to moves_queue:', tile_x, tile_y, left_released, right_released)
+                #action_queue.append([tile_x, tile_y, left_released, right_released])
+                #print('appended to moves_queue:', tile_x, tile_y, left_released, right_released)
                 left_pressed = False
                 right_pressed = False
 
