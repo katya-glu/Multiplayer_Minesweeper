@@ -111,10 +111,10 @@ def kafka_consumer(topic_name):
                              pressed_tile_data_dict["left_released"], pressed_tile_data_dict["right_released"]])
         print(action_queue)
 
-def event_consumer(game_board):
+def event_consumer(game_board, topic_name):
     print('beginning of event consumer')
     # TODO: consider removing kafka thread and removing the action queue
-    kafka_consumer_thread = threading.Thread(target=kafka_consumer, args=['tiles'])
+    kafka_consumer_thread = threading.Thread(target=kafka_consumer, args=[topic_name])
     kafka_consumer_thread.start()
 
     global run
@@ -148,7 +148,9 @@ def get_tile_data_dict(tile_x, tile_y, left_released, right_released):
 def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add comments
     print("main start, threads: {}".format( threading.active_count() ))
 
-    np.random.seed(1)
+    # TODO: add Tkinter functionality to choose seed
+    random_seed = 1     # random_seed generates a specific board setup for all users who enter this seed
+    np.random.seed(random_seed)
     game_board = Board(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines)
     game_board.place_objects_in_array()
     game_board.count_num_of_touching_mines()
@@ -160,14 +162,17 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
     global run
     run = True
 
+    # kafka vars
+    # each seed (seed == board setup) has its own topic, to pass messages only between prod/cons of this seed
+    topic_name = str(random_seed)
+    kafka_server = 'localhost:9092'
+
     # starting consumer thread for kafka use
-    consumer_thread = threading.Thread(target=event_consumer, args=[game_board])
+    consumer_thread = threading.Thread(target=event_consumer, args=[game_board, topic_name])
     consumer_thread.start()
 
     # start kafka producer
-    TOPIC_NAME = 'tiles'
-    KAFKA_SERVER = 'localhost:9092'
-    producer = KafkaProducer(bootstrap_servers=KAFKA_SERVER,
+    producer = KafkaProducer(bootstrap_servers=kafka_server,
                              value_serializer=lambda data: json.dumps(data).encode('utf-8'))
 
     while run:
@@ -180,7 +185,7 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
 
             if event.type == pygame.QUIT:
                 run = False
-                producer.send(TOPIC_NAME, {'quit': 'quit'})
+                producer.send(topic_name, {'quit': 'quit'})
                 producer.flush()
 
             # new game button pressed
@@ -223,7 +228,7 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
                 tile_data_dict = get_tile_data_dict(tile_x, tile_y, left_released, right_released)
 
                 # TODO: test efficiency of sending bytes vs. json
-                producer.send(TOPIC_NAME, tile_data_dict)
+                producer.send(topic_name, tile_data_dict)
                 producer.flush()
 
                 # TODO: remove next 3 lines
