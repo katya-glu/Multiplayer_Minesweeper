@@ -97,14 +97,19 @@ def kafka_consumer(topic_name):
     TOPIC_NAME = topic_name
 
     consumer = KafkaConsumer(TOPIC_NAME, value_deserializer=lambda data: json.loads(data.decode('utf-8')))
+    global run
 
     for message in consumer:
-        # message.value contains dict with pressed tile data
+        # message.value contains dict with pressed tile data or 'quit' command
+        # checking run flag to close only local consumer
+        if not run and message.value['quit'] in message.value:
+            print('killing kafka consumer')
+            break
+
         pressed_tile_data_dict = message.value
         action_queue.append([pressed_tile_data_dict["tile_x"], pressed_tile_data_dict["tile_y"],
                              pressed_tile_data_dict["left_released"], pressed_tile_data_dict["right_released"]])
         print(action_queue)
-
 
 def event_consumer(game_board):
     print('beginning of event consumer')
@@ -134,12 +139,16 @@ def event_consumer(game_board):
         game_board.update_clock()
         pygame.display.update()
 
+    print("event_consumer quitting")
+
 def get_tile_data_dict(tile_x, tile_y, left_released, right_released):
     return {'tile_x': tile_x, 'tile_y': tile_y, 'left_released': left_released, 'right_released': right_released}
 
 
 def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add comments
-    #np.random.seed(1)
+    print("main start, threads: {}".format( threading.active_count() ))
+
+    np.random.seed(1)
     game_board = Board(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines)
     game_board.place_objects_in_array()
     game_board.count_num_of_touching_mines()
@@ -148,14 +157,19 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
     LEFT = 1
     RIGHT = 3
 
+    global run
+    run = True
+
     # starting consumer thread for kafka use
     consumer_thread = threading.Thread(target=event_consumer, args=[game_board])
     consumer_thread.start()
 
-    left_released = False
-    right_released = False
+    # start kafka producer
+    TOPIC_NAME = 'tiles'
+    KAFKA_SERVER = 'localhost:9092'
+    producer = KafkaProducer(bootstrap_servers=KAFKA_SERVER,
+                             value_serializer=lambda data: json.dumps(data).encode('utf-8'))
 
-    global run
     while run:
         """if left_released:
             print("clear left_released")"""
@@ -166,6 +180,8 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
 
             if event.type == pygame.QUIT:
                 run = False
+                producer.send(TOPIC_NAME, {'quit': 'quit'})
+                producer.flush()
 
             # new game button pressed
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == LEFT and \
@@ -204,21 +220,9 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
                 tile_x = tile_xy[0]
                 tile_y = tile_xy[1]
 
-                """tile_x_str = str(tile_x)
-                tile_x_bytes = tile_x_str.encode()
-                tile_y_str = str(tile_y)
-                tile_y_bytes = tile_y_str.encode()"""
-
                 tile_data_dict = get_tile_data_dict(tile_x, tile_y, left_released, right_released)
 
-                # start kafka producer
-                TOPIC_NAME = 'tiles'
-                KAFKA_SERVER = 'localhost:9092'
-
-                producer = KafkaProducer(bootstrap_servers=KAFKA_SERVER,
-                                         value_serializer=lambda data: json.dumps(data).encode('utf-8'))
                 # TODO: test efficiency of sending bytes vs. json
-                #producer.send(TOPIC_NAME, b'tile_x: %b, tile_y: %b' % (tile_x_bytes, tile_y_bytes))
                 producer.send(TOPIC_NAME, tile_data_dict)
                 producer.flush()
 
