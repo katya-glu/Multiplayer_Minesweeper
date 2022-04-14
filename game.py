@@ -2,6 +2,7 @@ from plot_high_score_class import HighScore
 from tkinter import *
 from tkinter import messagebox
 from Board import Board
+import random
 import pygame
 import time
 import numpy as np
@@ -25,9 +26,13 @@ num_of_tiles_x_large_board = 30
 num_of_tiles_y_large_board = 16
 num_of_mines_large_board = 99
 
+# constants
+top_of_range = 4000000000
+
 # global vars
 action_queue = []
 run = True
+random_producer_id = 0
 
 def get_board_size(size_str):
     # function gets size_str from open_opening_window func in game_class file
@@ -102,17 +107,31 @@ def kafka_consumer(topic_name):
     for message in consumer:
         # message.value contains dict with pressed tile data or 'quit' command
         # checking run flag to close only local consumer
-        if not run and message.value['quit'] in message.value:
-            print('killing kafka consumer')
+        # if key not in dict, dict.get(key) will return None. flag will be used to continue gameplay
+        quit_val = message.value.get('quit')
+        if not run and quit_val:
+            #print('killing kafka consumer')
             break
 
-        pressed_tile_data_dict = message.value
-        action_queue.append([pressed_tile_data_dict["tile_x"], pressed_tile_data_dict["tile_y"],
-                             pressed_tile_data_dict["left_released"], pressed_tile_data_dict["right_released"]])
-        print(action_queue)
+        # if quit_val != None, game continues for user
+        if not quit_val:
+            pressed_tile_data_dict = message.value
+            producer_id_from_kafka = message.value['random_producer_id']
+            global random_producer_id
+            if producer_id_from_kafka == random_producer_id:
+                from_local_producer = True
+            else:
+                from_local_producer = False
+            print("producer_id_from_kafka: ", producer_id_from_kafka)
+            print("from_local_producer: ", from_local_producer)
+
+            action_queue.append([from_local_producer, pressed_tile_data_dict["tile_x"],
+                                 pressed_tile_data_dict["tile_y"], pressed_tile_data_dict["left_released"],
+                                 pressed_tile_data_dict["right_released"]])
+            print(action_queue)
 
 def event_consumer(game_board, topic_name):
-    print('beginning of event consumer')
+    #print('beginning of event consumer')
     # TODO: consider removing kafka thread and removing the action queue
     kafka_consumer_thread = threading.Thread(target=kafka_consumer, args=[topic_name])
     kafka_consumer_thread.start()
@@ -120,7 +139,8 @@ def event_consumer(game_board, topic_name):
     global run
     while run:
         if len(action_queue) != 0:
-            [action_tile_x, action_tile_y, action_left_released, action_right_released] = action_queue.pop(0)
+            [from_local_producer, action_tile_x, action_tile_y, action_left_released, action_right_released] = \
+                action_queue.pop(0)
             print("pop from action queue")
             # game state is updated according to the pressed button
             if (action_left_released or action_right_released):
@@ -139,14 +159,19 @@ def event_consumer(game_board, topic_name):
         game_board.update_clock()
         pygame.display.update()
 
-    print("event_consumer quitting")
+    #print("event_consumer quitting")
 
-def get_tile_data_dict(tile_x, tile_y, left_released, right_released):
-    return {'tile_x': tile_x, 'tile_y': tile_y, 'left_released': left_released, 'right_released': right_released}
+
+def get_tile_data_dict(random_producer_id, tile_x, tile_y, left_released, right_released):
+    # data preparation for sending to consumer (should be possible to convert to json)
+    return {'random_producer_id': random_producer_id ,'tile_x': tile_x, 'tile_y': tile_y, 'left_released': left_released,
+            'right_released': right_released}
 
 
 def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add comments
-    print("main start, threads: {}".format( threading.active_count() ))
+    #print("main start, threads: {}".format( threading.active_count() ))
+    global random_producer_id
+    random_producer_id = random.randint(0, top_of_range)
 
     # TODO: add Tkinter functionality to choose seed
     random_seed = 1     # random_seed generates a specific board setup for all users who enter this seed
@@ -225,14 +250,16 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
                 tile_x = tile_xy[0]
                 tile_y = tile_xy[1]
 
-                tile_data_dict = get_tile_data_dict(tile_x, tile_y, left_released, right_released)
+                # send to consumers clicks on game tiles only (x>=0, y>=0)
+                if tile_x >= 0 and tile_y >= 0:
+                    tile_data_dict = get_tile_data_dict(random_producer_id, tile_x, tile_y, left_released, right_released)
 
-                # TODO: test efficiency of sending bytes vs. json
-                producer.send(topic_name, tile_data_dict)
-                producer.flush()
+                    # TODO: test efficiency of sending bytes vs. json
+                    producer.send(topic_name, tile_data_dict)
+                    producer.flush()
 
                 # TODO: remove next 3 lines
-                global action_queue
+                #global action_queue
                 #action_queue.append([tile_x, tile_y, left_released, right_released])
                 #print('appended to moves_queue:', tile_x, tile_y, left_released, right_released)
                 left_pressed = False

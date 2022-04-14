@@ -53,7 +53,8 @@ class Board:
         self.game_started = False
         self.game_start_time = 0
         self.time = 0
-        self.clock_font = pygame.font.SysFont("consolas", 20)
+        self.score = 0
+        self.clock_and_score_font = pygame.font.SysFont("consolas", 20)
         self.shown_array = np.zeros(self.board_shape, dtype=int)
         self.flags_array = np.zeros(self.board_shape, dtype=int)
         self.mines_array = np.zeros(self.board_shape, dtype=int)
@@ -77,7 +78,6 @@ class Board:
         joined_array = np.concatenate((ones_array, zeros_array))
         np.random.shuffle(joined_array)
         self.mines_array = joined_array.reshape(self.board_shape)
-        return self.mines_array  # TODO: remove return, not necessary
 
     def count_num_of_touching_mines(self):
         # function receives an array with mines locations, calculates how many mines touch each empty cell
@@ -183,6 +183,8 @@ class Board:
             elif right_click:
                 self.flags_array[tile_y][tile_x] = self.FLAGGED - self.flags_array[tile_y][tile_x]  # toggle flag on/off
 
+            self.update_score(left_click, right_click)  # TODO: move to more correct location
+
     def update_board_for_display(self):
         """
         Function updates board for display - the appropriate sprite index in tiles list is updated in board_for_display,
@@ -219,8 +221,12 @@ class Board:
                          ((self.window_width - self.new_button_icon.get_width()) / 2, 2))  # TODO: remove magic number
 
         # display clock
-        clock_text = self.clock_font.render('{0:03d}'.format(self.time), False, (255, 255, 255))
+        clock_text = self.clock_and_score_font.render('{0:03d}'.format(self.time), False, (255, 255, 255))
         self.window.blit(clock_text, (self.window_width - (clock_text.get_width() + 5), 5))  # TODO: remove magic number
+
+        # display score
+        score_text = self.clock_and_score_font.render('{0:03d}'.format(self.score), False, (255, 255, 255))
+        self.window.blit(score_text, (5, 5))  # TODO: remove magic number
 
         # display board
         for tile_y in range(self.num_of_tiles_y):
@@ -236,6 +242,17 @@ class Board:
             curr_time = time.time()
             time_from_start = int(curr_time - self.game_start_time)
             self.time = time_from_start
+
+    def update_score(self, left_click, right_click):    # TODO: update score only for local user
+        if left_click and not right_click:
+            self.score += 10
+            print(self.score)
+        elif right_click and not left_click:
+            self.score -= 1
+            print(self.score)
+        else:   # left_click and right_click
+            self.score += 20
+            print(self.score)
 
     def is_game_over(self):
         font = pygame.font.SysFont("", 40)
