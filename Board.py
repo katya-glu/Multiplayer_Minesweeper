@@ -22,6 +22,10 @@ class Board:
 
     NEW_GAME_BUTTON = 12
 
+    # score constants
+    hit_mine_points = -10
+    open_tile_points = 1
+
     # list of tiles images. displayed according to index (value in board_for_display array)
     tiles = [pygame.image.load("empty.png"), pygame.image.load("one.png"), pygame.image.load("two.png"),
              pygame.image.load("three.png"), pygame.image.load("four.png"), pygame.image.load("five.png"),
@@ -122,7 +126,7 @@ class Board:
         if right_click and not left_click:
             return True
 
-    def flood_fill(self, tile_x, tile_y, left_and_right_click):
+    def flood_fill(self, tile_x, tile_y, left_and_right_click): # TODO: return number of tiles opened
         # flood fill algorithm - https://en.wikipedia.org/wiki/Flood_fill
         # func is being called only if the opened tile is empty
         flood_fill_queue = []
@@ -151,9 +155,9 @@ class Board:
                             if self.shown_array[neighbour_y][neighbour_x] == self.HIDDEN:
                                 flood_fill_queue.append((neighbour_y, neighbour_x))
                                 self.shown_array[neighbour_y][neighbour_x] = self.SHOWN  # all neighbours change to shown
-        return
+        return 1
 
-    def update_game_state(self, tile_x, tile_y, left_click, right_click):
+    def update_game_state(self, from_local_producer, tile_x, tile_y, left_click, right_click):
         # function updates game state upon receiving valid input
         if self.is_valid_input(tile_x, tile_y, left_click, right_click):  # shown_array[tile_y][tile_x] == self.HIDDEN
             if left_click and right_click:
@@ -170,20 +174,30 @@ class Board:
                     for curr_tile_y in range(y_start, y_end):  # TODO: switch to numpy operation
                         for curr_tile_x in range(x_start, x_end):
                             self.shown_array[curr_tile_y][curr_tile_x] = self.SHOWN
-                    self.flood_fill(tile_x, tile_y, True)
+                    num_of_open_tiles = self.flood_fill(tile_x, tile_y, True)
+                    if from_local_producer:
+                        self.update_score(self.open_tile_points * num_of_open_tiles)
                 else:
                     self.hit_mine = True
+                    if from_local_producer:
+                        self.update_score(self.hit_mine_points)
             elif left_click and self.board_array[tile_y][tile_x] != self.TILE_EMPTY:
                 self.shown_array[tile_y][tile_x] = self.SHOWN
                 if self.board_array[tile_y][tile_x] == self.TILE_MINE:
                     self.hit_mine = True
                     self.board_array[tile_y][tile_x] = self.LOSING_MINE_RED
+                    if from_local_producer:
+                        self.update_score(self.hit_mine_points)
+                # update score if empty tile opened and not hit_mine
+                if from_local_producer and not self.hit_mine:
+                    self.update_score(self.open_tile_points)
             elif left_click and self.board_array[tile_y][tile_x] == self.TILE_EMPTY:
-                self.flood_fill(tile_x, tile_y, False)
+                num_of_open_tiles = self.flood_fill(tile_x, tile_y, False)
+                if from_local_producer:
+                    self.update_score(self.open_tile_points * num_of_open_tiles)
             elif right_click:
                 self.flags_array[tile_y][tile_x] = self.FLAGGED - self.flags_array[tile_y][tile_x]  # toggle flag on/off
 
-            self.update_score(left_click, right_click)  # TODO: move to more correct location
 
     def update_board_for_display(self):
         """
@@ -243,16 +257,8 @@ class Board:
             time_from_start = int(curr_time - self.game_start_time)
             self.time = time_from_start
 
-    def update_score(self, left_click, right_click):    # TODO: update score only for local user
-        if left_click and not right_click:
-            self.score += 10
-            print(self.score)
-        elif right_click and not left_click:
-            self.score -= 1
-            print(self.score)
-        else:   # left_click and right_click
-            self.score += 20
-            print(self.score)
+    def update_score(self, points_to_update):
+        self.score += points_to_update
 
     def is_game_over(self):
         font = pygame.font.SysFont("", 40)

@@ -27,12 +27,12 @@ num_of_tiles_y_large_board = 16
 num_of_mines_large_board = 99
 
 # constants
-top_of_range = 4000000000
+prod_id_max_val = (2 ** 32) - 1
 
 # global vars
 action_queue = []
 run = True
-random_producer_id = 0
+producer_id = 0
 
 def get_board_size(size_str):
     # function gets size_str from open_opening_window func in game_class file
@@ -113,17 +113,17 @@ def kafka_consumer(topic_name):
             #print('killing kafka consumer')
             break
 
-        # if quit_val != None, game continues for user
+        # if quit_val == None, game continues for user
         if not quit_val:
             pressed_tile_data_dict = message.value
-            producer_id_from_kafka = message.value['random_producer_id']
-            global random_producer_id
-            if producer_id_from_kafka == random_producer_id:
+            producer_id_from_kafka = message.value['producer_id']
+            global producer_id
+            if producer_id_from_kafka == producer_id:
                 from_local_producer = True
             else:
                 from_local_producer = False
-            print("producer_id_from_kafka: ", producer_id_from_kafka)
-            print("from_local_producer: ", from_local_producer)
+            #print("producer_id_from_kafka: ", producer_id_from_kafka)
+            #print("from_local_producer: ", from_local_producer)
 
             action_queue.append([from_local_producer, pressed_tile_data_dict["tile_x"],
                                  pressed_tile_data_dict["tile_y"], pressed_tile_data_dict["left_released"],
@@ -147,7 +147,8 @@ def event_consumer(game_board, topic_name):
                 if not game_board.game_started and action_left_released and not action_right_released:
                     game_board.game_start_time = time.time()
                     game_board.game_started = True
-                game_board.update_game_state(action_tile_x, action_tile_y, action_left_released, action_right_released)
+                game_board.update_game_state(from_local_producer, action_tile_x, action_tile_y, action_left_released,
+                                             action_right_released)
 
         game_board.update_board_for_display()
         game_board.display_game_board()
@@ -162,16 +163,16 @@ def event_consumer(game_board, topic_name):
     #print("event_consumer quitting")
 
 
-def get_tile_data_dict(random_producer_id, tile_x, tile_y, left_released, right_released):
+def get_tile_data_dict(producer_id, tile_x, tile_y, left_released, right_released):
     # data preparation for sending to consumer (should be possible to convert to json)
-    return {'random_producer_id': random_producer_id ,'tile_x': tile_x, 'tile_y': tile_y, 'left_released': left_released,
+    return {'producer_id': producer_id ,'tile_x': tile_x, 'tile_y': tile_y, 'left_released': left_released,
             'right_released': right_released}
 
 
 def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add comments
     #print("main start, threads: {}".format( threading.active_count() ))
-    global random_producer_id
-    random_producer_id = random.randint(0, top_of_range)
+    global producer_id
+    producer_id = random.randint(0, prod_id_max_val)  # needs to come before random seed, to get unique producer_id
 
     # TODO: add Tkinter functionality to choose seed
     random_seed = 1     # random_seed generates a specific board setup for all users who enter this seed
@@ -251,8 +252,9 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
                 tile_y = tile_xy[1]
 
                 # send to consumers clicks on game tiles only (x>=0, y>=0)
+                # TODO: add condition on upper bound (tile_x <= ...)
                 if tile_x >= 0 and tile_y >= 0:
-                    tile_data_dict = get_tile_data_dict(random_producer_id, tile_x, tile_y, left_released, right_released)
+                    tile_data_dict = get_tile_data_dict(producer_id, tile_x, tile_y, left_released, right_released)
 
                     # TODO: test efficiency of sending bytes vs. json
                     producer.send(topic_name, tile_data_dict)
