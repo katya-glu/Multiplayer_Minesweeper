@@ -114,7 +114,7 @@ class Board:
                     return True
                 else:
                     return False
-        if tile_x < 0 or tile_y < 0:
+        if tile_x < 0 or tile_y < 0 or tile_x > (self.num_of_tiles_x - 1) or tile_y > (self.num_of_tiles_y - 1):
             return False
         if self.shown_array[tile_y][tile_x] == self.SHOWN:
             return False
@@ -130,6 +130,7 @@ class Board:
         # flood fill algorithm - https://en.wikipedia.org/wiki/Flood_fill
         # func is being called only if the opened tile is empty
         flood_fill_queue = []
+        opened_tiles_num = 0    # counting num of open tiles for score update
         if left_and_right_click:
             y_start = max(tile_y - 1, 0)
             y_end = min(tile_y + 2, self.num_of_tiles_y)
@@ -137,10 +138,14 @@ class Board:
             x_end = min(tile_x + 2, self.num_of_tiles_x)
             for curr_tile_y in range(y_start, y_end):  # TODO: switch to numpy operation
                 for curr_tile_x in range(x_start, x_end):
-                    self.shown_array[curr_tile_y][curr_tile_x] = self.SHOWN
+                    if self.shown_array[curr_tile_y][curr_tile_x] == self.HIDDEN:
+                        self.shown_array[curr_tile_y][curr_tile_x] = self.SHOWN
+                        opened_tiles_num += 1
                     flood_fill_queue.append((curr_tile_y, curr_tile_x))
         else:
-            self.shown_array[tile_y][tile_x] = self.SHOWN
+            if self.shown_array[tile_y][tile_x] == self.HIDDEN:
+                self.shown_array[tile_y][tile_x] = self.SHOWN
+                opened_tiles_num += 1
             flood_fill_queue = [(tile_y, tile_x)]
 
         while len(flood_fill_queue) != 0:
@@ -155,7 +160,8 @@ class Board:
                             if self.shown_array[neighbour_y][neighbour_x] == self.HIDDEN:
                                 flood_fill_queue.append((neighbour_y, neighbour_x))
                                 self.shown_array[neighbour_y][neighbour_x] = self.SHOWN  # all neighbours change to shown
-        return 1
+                                opened_tiles_num += 1
+        return opened_tiles_num
 
     def update_game_state(self, from_local_producer, tile_x, tile_y, left_click, right_click):
         # function updates game state upon receiving valid input

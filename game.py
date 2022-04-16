@@ -33,6 +33,7 @@ prod_id_max_val = (2 ** 32) - 1
 action_queue = []
 run = True
 producer_id = 0
+game_started = False
 
 def get_board_size(size_str):
     # function gets size_str from open_opening_window func in game_class file
@@ -100,21 +101,31 @@ def add_high_score(game_board, score, size_index):
 
 def kafka_consumer(topic_name):
     TOPIC_NAME = topic_name
-
-    consumer = KafkaConsumer(TOPIC_NAME, value_deserializer=lambda data: json.loads(data.decode('utf-8')))
+    # auto_offset_reset='earliest',
+    consumer = KafkaConsumer(TOPIC_NAME, auto_offset_reset='smallest',
+                             value_deserializer=lambda data: json.loads(data.decode('utf-8')))
     global run
 
+    connected_players_num = 0
     for message in consumer:
         # message.value contains dict with pressed tile data or 'quit' command
-        # checking run flag to close only local consumer
-        # if key not in dict, dict.get(key) will return None. flag will be used to continue gameplay
-        quit_val = message.value.get('quit')
-        if not run and quit_val:
-            #print('killing kafka consumer')
-            break
+        msg_type = message.value.get('msg_type')
+        print('msg_type: ', msg_type)
+        if msg_type == 'control':
+            msg = message.value.get('msg')
+            # checking run flag to close only local consumer
+            if msg == 'joining':
+                #print('joining')
+                connected_players_num += 1
+                print('joining msg received, num of players is ', connected_players_num)
+            if not run:
+                #print('killing kafka consumer')
+                connected_players_num -= 1
+                print('quitting msg received, num of players is ', connected_players_num)
+                break
 
         # if quit_val == None, game continues for user
-        if not quit_val:
+        if msg_type == 'data':
             pressed_tile_data_dict = message.value
             producer_id_from_kafka = message.value['producer_id']
             global producer_id
@@ -165,7 +176,7 @@ def event_consumer(game_board, topic_name):
 
 def get_tile_data_dict(producer_id, tile_x, tile_y, left_released, right_released):
     # data preparation for sending to consumer (should be possible to convert to json)
-    return {'producer_id': producer_id ,'tile_x': tile_x, 'tile_y': tile_y, 'left_released': left_released,
+    return {'msg_type': 'data', 'producer_id': producer_id,'tile_x': tile_x, 'tile_y': tile_y, 'left_released': left_released,
             'right_released': right_released}
 
 
@@ -175,7 +186,7 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
     producer_id = random.randint(0, prod_id_max_val)  # needs to come before random seed, to get unique producer_id
 
     # TODO: add Tkinter functionality to choose seed
-    random_seed = 1     # random_seed generates a specific board setup for all users who enter this seed
+    random_seed = 2     # random_seed generates a specific board setup for all users who enter this seed
     np.random.seed(random_seed)
     game_board = Board(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines)
     game_board.place_objects_in_array()
@@ -201,6 +212,15 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
     producer = KafkaProducer(bootstrap_servers=kafka_server,
                              value_serializer=lambda data: json.dumps(data).encode('utf-8'))
 
+    global game_started
+
+    if not game_started:
+        print("game_started: ", game_started)
+        producer.send(topic_name, {'msg_type': 'control', 'msg': 'joining'})
+        producer.flush()
+        game_started = True
+
+    print("game_started: ", game_started)
     while run:
         """if left_released:
             print("clear left_released")"""
@@ -211,7 +231,7 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
 
             if event.type == pygame.QUIT:
                 run = False
-                producer.send(topic_name, {'quit': 'quit'})
+                producer.send(topic_name, {'msg_type': 'control', 'msg': 'quit'})
                 producer.flush()
 
             # new game button pressed
@@ -252,8 +272,9 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
                 tile_y = tile_xy[1]
 
                 # send to consumers clicks on game tiles only (x>=0, y>=0)
-                # TODO: add condition on upper bound (tile_x <= ...)
-                if tile_x >= 0 and tile_y >= 0:
+                if tile_x >= 0 and tile_y >= 0 and \
+                   tile_x <= (game_board.num_of_tiles_x - 1) and tile_y <= (game_board.num_of_tiles_y - 1):
+                    # get_tile_data_dict func adds a {'msg_type': 'data'} key-value pair
                     tile_data_dict = get_tile_data_dict(producer_id, tile_x, tile_y, left_released, right_released)
 
                     # TODO: test efficiency of sending bytes vs. json
@@ -269,6 +290,7 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
 
     time.sleep(1)   # wait 1 sec to avoid thread crash on pygame command
     pygame.quit()
+    game_started = False
 
 
 open_opening_window()
