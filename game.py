@@ -102,7 +102,7 @@ def add_high_score(game_board, score, size_index):
 def kafka_consumer(topic_name):
     TOPIC_NAME = topic_name
     # auto_offset_reset='earliest',
-    consumer = KafkaConsumer(TOPIC_NAME, auto_offset_reset='smallest',
+    consumer = KafkaConsumer(TOPIC_NAME,
                              value_deserializer=lambda data: json.loads(data.decode('utf-8')))
     global run
 
@@ -256,7 +256,7 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
 
 
             elif event.type == pygame.MOUSEBUTTONUP and (event.button == LEFT or event.button == RIGHT):
-                #detection of mouse button release, game state will be updated once mouse button is released
+                # detection of mouse button release, game state will be updated once mouse button is released
                 if left_pressed and not right_pressed:
                     left_released = True
                 if right_pressed and not left_pressed:

@@ -138,9 +138,13 @@ class Board:
             x_end = min(tile_x + 2, self.num_of_tiles_x)
             for curr_tile_y in range(y_start, y_end):  # TODO: switch to numpy operation
                 for curr_tile_x in range(x_start, x_end):
-                    if self.shown_array[curr_tile_y][curr_tile_x] == self.HIDDEN:
+                    print('left and right click ff loop')
+                    if self.shown_array[curr_tile_y][curr_tile_x] == self.HIDDEN and \
+                            self.flags_array[curr_tile_y][curr_tile_x] != self.FLAGGED:
+                        print('left and right click ff loop hidden condition')
                         self.shown_array[curr_tile_y][curr_tile_x] = self.SHOWN
                         opened_tiles_num += 1
+                        print('left and right click opened tiles num increase')
                     flood_fill_queue.append((curr_tile_y, curr_tile_x))
         else:
             if self.shown_array[tile_y][tile_x] == self.HIDDEN:
@@ -173,13 +177,6 @@ class Board:
                 padded_tile_y = tile_y + 1
                 if (padded_flags_array[padded_tile_y - 1:padded_tile_y + 2, padded_tile_x - 1:padded_tile_x + 2]
                         == padded_mines_array[padded_tile_y - 1:padded_tile_y + 2, padded_tile_x - 1:padded_tile_x + 2]).all():
-                    y_start = max(tile_y - 1, 0)
-                    y_end = min(tile_y + 2, self.num_of_tiles_y)
-                    x_start = max(tile_x - 1, 0)
-                    x_end = min(tile_x + 2, self.num_of_tiles_x)
-                    for curr_tile_y in range(y_start, y_end):  # TODO: switch to numpy operation
-                        for curr_tile_x in range(x_start, x_end):
-                            self.shown_array[curr_tile_y][curr_tile_x] = self.SHOWN
                     num_of_open_tiles = self.flood_fill(tile_x, tile_y, True)
                     if from_local_producer:
                         self.update_score(self.open_tile_points * num_of_open_tiles)
