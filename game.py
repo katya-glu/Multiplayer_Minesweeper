@@ -9,6 +9,8 @@ import numpy as np
 import threading
 from kafka import KafkaConsumer
 from kafka import KafkaProducer
+from kafka.admin import KafkaAdminClient
+from kafka.errors import (UnknownTopicOrPartitionError)
 import json
 pygame.init()
 
@@ -102,7 +104,7 @@ def add_high_score(game_board, score, size_index):
 def kafka_consumer(topic_name):
     TOPIC_NAME = topic_name
     # auto_offset_reset='earliest',
-    consumer = KafkaConsumer(TOPIC_NAME,
+    consumer = KafkaConsumer(TOPIC_NAME, auto_offset_reset='earliest',
                              value_deserializer=lambda data: json.loads(data.decode('utf-8')))
     global run
 
@@ -290,7 +292,19 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
 
     time.sleep(1)   # wait 1 sec to avoid thread crash on pygame command
     pygame.quit()
+    """admin_client = KafkaAdminClient(bootstrap_servers=kafka_server)
+    #admin_client.delete_topics(topics=[topic_name])
+    try:
+        print("deleting topic: ", topic_name)
+        admin_client.delete_topics(topics=topic_name)
+        print("Topic Deleted Successfully")
+    except UnknownTopicOrPartitionError as e:
+        print("Topic Doesn't Exist")
+    except  Exception as e:
+        print(e)"""
     game_started = False
+
+
 
 
 open_opening_window()
