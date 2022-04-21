@@ -239,12 +239,20 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_LEFT:
                     print("left key pressed")
+                    game_board.update_window_location(-1, 0)
+                    print("window location x is: ", game_board.window_loc_x)
                 if event.key == pygame.K_RIGHT:
                     print("right key pressed")
+                    game_board.update_window_location(1, 0)
+                    print("window location x is: ", game_board.window_loc_x)
                 if event.key == pygame.K_UP:
                     print("up key pressed")
+                    game_board.update_window_location(0, -1)
+                    print("window location y is: ", game_board.window_loc_y)
                 if event.key == pygame.K_DOWN:
                     print("down key pressed")
+                    game_board.update_window_location(0, 1)
+                    print("window location y is: ", game_board.window_loc_y)
 
             # new game button pressed
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == LEFT and \

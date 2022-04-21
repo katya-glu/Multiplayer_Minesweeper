@@ -59,6 +59,10 @@ class Board:
         self.win = False
         self.add_score = False
         self.game_started = False
+        self.window_loc_x = 2
+        self.window_loc_y = 1
+        self.tile_offset_for_display_x = self.window_loc_x
+        self.tile_offset_for_display_y = self.window_loc_y
         self.game_start_time = 0
         self.time = 0
         self.score = 0
@@ -98,8 +102,8 @@ class Board:
         self.board_array = self.neighbours_array + self.TILE_MINE * self.mines_array
 
     def pixel_xy_to_tile_xy(self, pixel_x, pixel_y):
-        tile_x = (pixel_x - self.delta_from_left_x) // self.tile_width
-        tile_y = (pixel_y - self.delta_from_top_y) // self.tile_height
+        tile_x = ((pixel_x - self.delta_from_left_x) // self.tile_width) + self.tile_offset_for_display_x
+        tile_y = ((pixel_y - self.delta_from_top_y) // self.tile_height) + self.tile_offset_for_display_y
         return tile_x, tile_y
 
     def is_valid_input(self, tile_x, tile_y, left_click, right_click):
@@ -250,12 +254,32 @@ class Board:
         self.window.blit(score_text, (5, 5))  # TODO: remove magic number
 
         # display board
-        for tile_y in range(self.num_of_tiles_y):
-            tile_pos_y = tile_y * self.tile_height + self.delta_from_top_y
-            for tile_x in range(self.num_of_tiles_x):
-                tile_pos_x = tile_x * self.tile_width
+        min_tile_val_x = self.window_loc_x
+        min_tile_val_y = self.window_loc_y
+        max_tile_val_x = self.window_loc_x + self.window_num_of_tiles_x
+        max_tile_val_y = self.window_loc_y + self.window_num_of_tiles_y
+        #print("min_tile_val_x: {}, min_tile_val_y: {}, max_tile_val_x: {}, max_tile_val_y: {}".format(min_tile_val_x,min_tile_val_y,max_tile_val_x,max_tile_val_y))
+        self.tile_offset_for_display_x = min_tile_val_x
+        self.tile_offset_for_display_y = min_tile_val_y
+        for tile_y in range(min_tile_val_y, max_tile_val_y):
+            tile_pos_y = (tile_y - self.tile_offset_for_display_y) * self.tile_height + self.delta_from_top_y
+            for tile_x in range(min_tile_val_x, max_tile_val_x):
+                tile_pos_x = (tile_x - self.tile_offset_for_display_x) * self.tile_width
                 curr_elem = self.board_for_display[tile_y][tile_x]
                 self.window.blit(self.tiles[curr_elem], (tile_pos_x, tile_pos_y))
+
+    def update_window_location(self, horizontal_displacement, vertical_displacement):
+        # horizontal_displacement/vertical_displacement can be 1/-1 --> right/left, down/up
+        # window location is in tiles, not pixels
+        print("update window location function called")
+        new_window_loc_x = self.window_loc_x + horizontal_displacement
+        new_window_loc_y = self.window_loc_y + vertical_displacement
+        if (new_window_loc_x >= 0) and (new_window_loc_x <= self.num_of_tiles_x - self.window_num_of_tiles_x):
+            self.window_loc_x = new_window_loc_x
+            print("window_loc_x updated")
+        if (new_window_loc_y >= 0) and (new_window_loc_y <= self.num_of_tiles_y - self.window_num_of_tiles_y):
+            self.window_loc_y = new_window_loc_y
+            print("window_loc_y updated")
 
     def update_clock(self):
         if self.game_started and self.time < 999 and not self.game_over:
