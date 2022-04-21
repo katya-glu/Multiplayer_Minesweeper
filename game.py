@@ -104,7 +104,7 @@ def add_high_score(game_board, score, size_index):
 def kafka_consumer(topic_name):
     TOPIC_NAME = topic_name
     # auto_offset_reset='earliest',
-    consumer = KafkaConsumer(TOPIC_NAME, auto_offset_reset='earliest',
+    consumer = KafkaConsumer(TOPIC_NAME,
                              value_deserializer=lambda data: json.loads(data.decode('utf-8')))
     global run
 
@@ -112,7 +112,7 @@ def kafka_consumer(topic_name):
     for message in consumer:
         # message.value contains dict with pressed tile data or 'quit' command
         msg_type = message.value.get('msg_type')
-        print('msg_type: ', msg_type)
+        #print('msg_type: ', msg_type)
         if msg_type == 'control':
             msg = message.value.get('msg')
             # checking run flag to close only local consumer
@@ -235,6 +235,16 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
                 run = False
                 producer.send(topic_name, {'msg_type': 'control', 'msg': 'quit'})
                 producer.flush()
+
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_LEFT:
+                    print("left key pressed")
+                if event.key == pygame.K_RIGHT:
+                    print("right key pressed")
+                if event.key == pygame.K_UP:
+                    print("up key pressed")
+                if event.key == pygame.K_DOWN:
+                    print("down key pressed")
 
             # new game button pressed
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == LEFT and \

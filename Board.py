@@ -26,6 +26,10 @@ class Board:
     hit_mine_points = -10
     open_tile_points = 1
 
+    # window constants
+    window_num_of_tiles_x = 8
+    window_num_of_tiles_y = 8
+
     # list of tiles images. displayed according to index (value in board_for_display array)
     tiles = [pygame.image.load("empty.png"), pygame.image.load("one.png"), pygame.image.load("two.png"),
              pygame.image.load("three.png"), pygame.image.load("four.png"), pygame.image.load("five.png"),
@@ -68,8 +72,8 @@ class Board:
         self.new_button_icon = self.tiles[self.NEW_GAME_BUTTON]
 
     def window_init(self):
-        self.window_width = self.num_of_tiles_x * self.tile_width + self.delta_from_left_x
-        self.window_height = self.num_of_tiles_y * self.tile_width + self.delta_from_top_y
+        self.window_width = self.window_num_of_tiles_x * self.tile_width + self.delta_from_left_x
+        self.window_height = self.window_num_of_tiles_y * self.tile_width + self.delta_from_top_y
         window = pygame.display.set_mode((self.window_width, self.window_height))
         pygame.display.set_caption("Minesweeper")
         return window
