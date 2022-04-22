@@ -27,8 +27,17 @@ class Board:
     open_tile_points = 1
 
     # window constants
-    window_num_of_tiles_x = 8
-    window_num_of_tiles_y = 8
+    window_num_of_tiles_x_var = 20
+    window_num_of_tiles_y_var = 20
+    radar_tile_size_px = 4
+    radar_margin_size_px = 3
+    light_grey = (211, 211, 211)
+    grey = (180, 180, 180)
+    white = (255, 255, 255)
+    blue = (0, 0, 255)
+    red = (220, 0, 0)
+    green = (30,150,30)
+    black = (0, 0, 0)
 
     # list of tiles images. displayed according to index (value in board_for_display array)
     tiles = [pygame.image.load("empty.png"), pygame.image.load("one.png"), pygame.image.load("two.png"),
@@ -36,6 +45,12 @@ class Board:
              pygame.image.load("six.png"), pygame.image.load("seven.png"), pygame.image.load("eight.png"),
              pygame.image.load("mine.png"), pygame.image.load("block.png"), pygame.image.load("flagged.png"),
              pygame.image.load("new_game_unpressed.png"), pygame.image.load("mine_red.png")]
+
+    # list of radar tile colors. displayed according to index (value in board_for_display array). correspond to tile
+    # types in the game
+    #                    empty 1     2     3     4     5     6     7     8     mine block       flag
+    radar_tile_colors = [grey, grey, grey, grey, grey, grey, grey, grey, grey, red, light_grey, green,
+                         pygame.image.load("new_game_unpressed.png"), red]
 
     def __init__(self, size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines, tile_width=16, tile_height=16):
         pygame.init()
@@ -46,10 +61,18 @@ class Board:
         self.num_of_mines = num_of_mines
         self.tile_width = tile_width
         self.tile_height = tile_height
+        self.window_num_of_tiles_x = min(self.window_num_of_tiles_x_var, self.num_of_tiles_x)
+        self.window_num_of_tiles_y = min(self.window_num_of_tiles_y_var, self.num_of_tiles_y)
+        # self.radar_margin_size_px*2 - adding delta for margin on the left and right of the radar
+        self.radar_width = self.num_of_tiles_x * self.radar_tile_size_px
+        self.radar_height = self.num_of_tiles_y * self.radar_tile_size_px
+        self.delta_from_right_x = self.radar_width + self.radar_margin_size_px*2
         self.delta_from_left_x = 0
         self.delta_from_top_y = 30
-        self.window_width = 0
-        self.window_height = 0
+        self.radar_pos_x = self.window_num_of_tiles_x * self.tile_width + self.radar_margin_size_px
+        self.radar_pos_y = self.delta_from_top_y + 2
+        self.window_pixel_width = 0
+        self.window_pixel_height = 0
         self.window = self.window_init()
         self.board_init()
 
@@ -59,8 +82,8 @@ class Board:
         self.win = False
         self.add_score = False
         self.game_started = False
-        self.window_loc_x = 2
-        self.window_loc_y = 1
+        self.window_loc_x = 0
+        self.window_loc_y = 0
         self.tile_offset_for_display_x = self.window_loc_x
         self.tile_offset_for_display_y = self.window_loc_y
         self.game_start_time = 0
@@ -76,9 +99,9 @@ class Board:
         self.new_button_icon = self.tiles[self.NEW_GAME_BUTTON]
 
     def window_init(self):
-        self.window_width = self.window_num_of_tiles_x * self.tile_width + self.delta_from_left_x
-        self.window_height = self.window_num_of_tiles_y * self.tile_width + self.delta_from_top_y
-        window = pygame.display.set_mode((self.window_width, self.window_height))
+        self.window_pixel_width = self.window_num_of_tiles_x * self.tile_width + self.delta_from_left_x + self.delta_from_right_x
+        self.window_pixel_height = max(self.window_num_of_tiles_y * self.tile_width + self.delta_from_top_y, self.radar_height)
+        window = pygame.display.set_mode((self.window_pixel_width, self.window_pixel_height))
         pygame.display.set_caption("Minesweeper")
         return window
 
@@ -243,15 +266,21 @@ class Board:
 
         # display new game button
         self.window.blit(self.new_button_icon,
-                         ((self.window_width - self.new_button_icon.get_width()) / 2, 2))  # TODO: remove magic number
+                         ((self.window_pixel_width - self.new_button_icon.get_width()) / 2, 2))  # TODO: remove magic number
 
         # display clock
         clock_text = self.clock_and_score_font.render('{0:03d}'.format(self.time), False, (255, 255, 255))
-        self.window.blit(clock_text, (self.window_width - (clock_text.get_width() + 5), 5))  # TODO: remove magic number
+        self.window.blit(clock_text, (self.window_pixel_width - (clock_text.get_width() + 5), 5))  # TODO: remove magic number
 
         # display score
         score_text = self.clock_and_score_font.render('{0:03d}'.format(self.score), False, (255, 255, 255))
         self.window.blit(score_text, (5, 5))  # TODO: remove magic number
+
+        # display radar
+        color = (128, 128, 128)
+        pygame.draw.rect(self.window, color,
+                         (self.radar_pos_x - 2, self.radar_pos_y - 2, self.radar_width + 4, self.radar_height + 4), 2)
+        self.display_radar()
 
         # display board
         min_tile_val_x = self.window_loc_x
@@ -267,6 +296,15 @@ class Board:
                 tile_pos_x = (tile_x - self.tile_offset_for_display_x) * self.tile_width
                 curr_elem = self.board_for_display[tile_y][tile_x]
                 self.window.blit(self.tiles[curr_elem], (tile_pos_x, tile_pos_y))
+
+    def display_radar(self):
+        for tile_y in range(self.num_of_tiles_y):
+            tile_pos_y = tile_y * self.radar_tile_size_px + self.radar_pos_y
+            for tile_x in range(self.num_of_tiles_x):
+                tile_pos_x = tile_x * self.radar_tile_size_px + self.radar_pos_x
+                curr_elem = self.board_for_display[tile_y][tile_x]
+                pygame.draw.rect(self.window, self.radar_tile_colors[curr_elem],
+                                 (tile_pos_x, tile_pos_y, self.radar_tile_size_px, self.radar_tile_size_px))
 
     def update_window_location(self, horizontal_displacement, vertical_displacement):
         # horizontal_displacement/vertical_displacement can be 1/-1 --> right/left, down/up
@@ -296,18 +334,18 @@ class Board:
         if self.hit_mine:
             self.game_over = True  # TODO: check if this is used, if not - remove
             lose_text = font.render("You lose", True, (255, 0, 0))
-            self.window.blit(lose_text, ((self.window_width - lose_text.get_width()) // 2, self.window_height // 2))
+            self.window.blit(lose_text, ((self.window_pixel_width - lose_text.get_width()) // 2, self.window_pixel_height // 2))
         if (self.flags_array == self.mines_array).all():
             self.game_over = True  # TODO: check if this is used, if not - remove
             win_text = font.render("You win", True, (255, 0, 0))
-            self.window.blit(win_text, ((self.window_width - win_text.get_width()) // 2, self.window_height // 2))
+            self.window.blit(win_text, ((self.window_pixel_width - win_text.get_width()) // 2, self.window_pixel_height // 2))
             if not self.win:
                 self.win = True
                 self.add_score = True
 
     def is_mouse_over_new_game_button(self, mouse_position):
         # function decides whether the mouse is located over the new game button
-        new_game_button_x = (self.window_width - self.new_button_icon.get_width()) // 2
+        new_game_button_x = (self.window_pixel_width - self.new_button_icon.get_width()) // 2
         new_game_button_y = 2
         new_game_button_width = new_game_button_x + self.new_button_icon.get_width()
         new_game_button_height = new_game_button_y + self.new_button_icon.get_height()

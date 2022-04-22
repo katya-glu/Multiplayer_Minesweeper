@@ -16,17 +16,17 @@ pygame.init()
 
 
 # board size constants
-num_of_tiles_x_small_board = 8
-num_of_tiles_y_small_board = 8
-num_of_mines_small_board = 4
+num_of_tiles_x_small_board = 13
+num_of_tiles_y_small_board = 15
+num_of_mines_small_board = 40
 
-num_of_tiles_x_medium_board = 13
-num_of_tiles_y_medium_board = 15
-num_of_mines_medium_board = 40
+num_of_tiles_x_medium_board = 40
+num_of_tiles_y_medium_board = 40
+num_of_mines_medium_board = int(0.2 * num_of_tiles_x_medium_board * num_of_tiles_y_medium_board) # 20% mines
 
-num_of_tiles_x_large_board = 30
-num_of_tiles_y_large_board = 16
-num_of_mines_large_board = 99
+num_of_tiles_x_large_board = 500
+num_of_tiles_y_large_board = 500
+num_of_mines_large_board = int(0.2 * num_of_tiles_x_large_board * num_of_tiles_y_large_board) # 20% mines
 
 # constants
 prod_id_max_val = (2 ** 32) - 1
