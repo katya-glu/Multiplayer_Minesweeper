@@ -29,14 +29,12 @@ class Board:
     # window constants
     window_num_of_tiles_x_var = 20
     window_num_of_tiles_y_var = 20
-    radar_tile_size_px = 4
-    radar_margin_size_px = 3
     light_grey = (211, 211, 211)
     grey = (180, 180, 180)
     white = (255, 255, 255)
-    blue = (0, 0, 255)
+    win_frame_color = (0, 0, 255)
     red = (220, 0, 0)
-    green = (30,150,30)
+    green = (30, 150, 30)
     black = (0, 0, 0)
 
     # list of tiles images. displayed according to index (value in board_for_display array)
@@ -63,6 +61,9 @@ class Board:
         self.tile_height = tile_height
         self.window_num_of_tiles_x = min(self.window_num_of_tiles_x_var, self.num_of_tiles_x)
         self.window_num_of_tiles_y = min(self.window_num_of_tiles_y_var, self.num_of_tiles_y)
+        # radar size is ~160 pixels. radar_tile_size_px is derived from #tiles, but in range[1, 5]
+        self.radar_tile_size_px = min(5, max(1, int(160/max(self.num_of_tiles_x, self.num_of_tiles_y))))
+        self.radar_margin_size_px = 3
         # self.radar_margin_size_px*2 - adding delta for margin on the left and right of the radar
         self.radar_width = self.num_of_tiles_x * self.radar_tile_size_px
         self.radar_height = self.num_of_tiles_y * self.radar_tile_size_px
@@ -305,6 +306,16 @@ class Board:
                 curr_elem = self.board_for_display[tile_y][tile_x]
                 pygame.draw.rect(self.window, self.radar_tile_colors[curr_elem],
                                  (tile_pos_x, tile_pos_y, self.radar_tile_size_px, self.radar_tile_size_px))
+
+        # window frame in radar with outline width of 2 pixels
+        outline_width = 2
+        win_frame_x = self.radar_pos_x + self.window_loc_x * self.radar_tile_size_px - outline_width
+        win_frame_y = self.radar_pos_y + self.window_loc_y * self.radar_tile_size_px - outline_width
+        win_frame_width = self.window_num_of_tiles_x * self.radar_tile_size_px + 2 * outline_width
+        win_frame_heigth = self.window_num_of_tiles_y * self.radar_tile_size_px + 2 * outline_width
+        pygame.draw.rect(self.window, self.win_frame_color,
+                         (win_frame_x, win_frame_y, win_frame_width, win_frame_heigth),
+                         outline_width)
 
     def update_window_location(self, horizontal_displacement, vertical_displacement):
         # horizontal_displacement/vertical_displacement can be 1/-1 --> right/left, down/up
