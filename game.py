@@ -267,6 +267,11 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
             elif game_board.hit_mine:
                 pass
 
+            # detection of click on radar
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == LEFT and \
+                 game_board.is_mouse_over_radar(mouse_position):
+                game_board.radar_pixel_xy_to_new_window_loc(mouse_position)
+
             # detection of mouse button press
             elif event.type == pygame.MOUSEBUTTONDOWN and (event.button == LEFT or event.button == RIGHT):
                 if event.button == LEFT:
@@ -292,8 +297,7 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
                 tile_y = tile_xy[1]
 
                 # send to consumers clicks on game tiles only (x>=0, y>=0)
-                if tile_x >= 0 and tile_y >= 0 and \
-                   tile_x <= (game_board.num_of_tiles_x - 1) and tile_y <= (game_board.num_of_tiles_y - 1):
+                if game_board.is_mouse_over_window(mouse_position):
                     # get_tile_data_dict func adds a {'msg_type': 'data'} key-value pair
                     tile_data_dict = get_tile_data_dict(producer_id, tile_x, tile_y, left_released, right_released)
 
