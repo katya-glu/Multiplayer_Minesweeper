@@ -1,6 +1,7 @@
 import numpy as np
 import pygame
 import time
+from datetime import datetime
 
 
 class Board:
@@ -73,6 +74,9 @@ class Board:
         # self.radar_margin_size_px*2 - adding delta for margin on the left and right of the radar
         self.radar_width_w_margins = self.radar_width + self.radar_margin_size_px * 2
         self.radar_height_w_margins = self.radar_height + self.radar_margin_size_px * 2
+        # radar_bg = pygame.image.load("radar_bg.png")
+        self.radar_surface = pygame.Surface((self.radar_width, self.radar_height))
+        self.radar_surface.fill(self.grey)
 
         self.window_start_pos_x = self.delta_from_left_x
         self.window_start_pos_y = self.delta_from_top_y
@@ -98,12 +102,12 @@ class Board:
         self.time = 0
         self.score = 0
         self.clock_and_score_font = pygame.font.SysFont("consolas", 20)
-        self.shown_array = np.zeros(self.board_shape, dtype=int)
-        self.flags_array = np.zeros(self.board_shape, dtype=int)
-        self.mines_array = np.zeros(self.board_shape, dtype=int)
-        self.neighbours_array = np.zeros(self.board_shape, dtype=int)
-        self.board_array = np.zeros(self.board_shape, dtype=int)
-        self.board_for_display = np.zeros(self.board_shape, dtype=int)
+        self.shown_array = np.zeros(self.board_shape, dtype=np.uint8)
+        self.flags_array = np.zeros(self.board_shape, dtype=np.uint8)
+        self.mines_array = np.zeros(self.board_shape, dtype=np.uint8)
+        self.neighbours_array = np.zeros(self.board_shape, dtype=np.uint8)
+        self.board_array = np.zeros(self.board_shape, dtype=np.uint8)
+        self.board_for_display = np.zeros(self.board_shape, dtype=np.uint8)
         self.new_button_icon = self.tiles[self.NEW_GAME_BUTTON]
 
     def canvas_init(self):
@@ -162,6 +166,7 @@ class Board:
             if self.flags_array[tile_y][tile_x] == self.FLAGGED:
                 return False
             else:
+                #print("valid left click")
                 return True
         if right_click and not left_click:
             return True
@@ -178,13 +183,13 @@ class Board:
             x_end = min(tile_x + 2, self.num_of_tiles_x)
             for curr_tile_y in range(y_start, y_end):  # TODO: switch to numpy operation
                 for curr_tile_x in range(x_start, x_end):
-                    print('left and right click ff loop')
+                    #print('left and right click ff loop')
                     if self.shown_array[curr_tile_y][curr_tile_x] == self.HIDDEN and \
                             self.flags_array[curr_tile_y][curr_tile_x] != self.FLAGGED:
-                        print('left and right click ff loop hidden condition')
+                        #print('left and right click ff loop hidden condition')
                         self.shown_array[curr_tile_y][curr_tile_x] = self.SHOWN
                         opened_tiles_num += 1
-                        print('left and right click opened tiles num increase')
+                        #print('left and right click opened tiles num increase')
                     flood_fill_queue.append((curr_tile_y, curr_tile_x))
         else:
             if self.shown_array[tile_y][tile_x] == self.HIDDEN:
@@ -226,6 +231,7 @@ class Board:
                         self.update_score(self.hit_mine_points)
             elif left_click and self.board_array[tile_y][tile_x] != self.TILE_EMPTY:
                 self.shown_array[tile_y][tile_x] = self.SHOWN
+                #print("turn tile to shown")
                 if self.board_array[tile_y][tile_x] == self.TILE_MINE:
                     self.hit_mine = True
                     self.board_array[tile_y][tile_x] = self.LOSING_MINE_RED
@@ -247,6 +253,8 @@ class Board:
         Function updates board for display - the appropriate sprite index in tiles list is updated in board_for_display,
         based on the shown array
         """
+        print("DEBUG: start ", datetime.now())
+
         for display_tile_y in range(self.num_of_tiles_y):
             for display_tile_x in range(self.num_of_tiles_x):
                 curr_tile_y = display_tile_y
@@ -255,18 +263,37 @@ class Board:
                 # updating flags
                 if self.flags_array[curr_tile_y][curr_tile_x] == self.FLAGGED:
                     self.board_for_display[curr_tile_y][curr_tile_x] = self.TILE_FLAG
+                    rect_color = self.radar_tile_colors[self.TILE_FLAG]
+                    self.radar_surface.fill(rect_color, (curr_tile_x * self.radar_tile_size_px,
+                                                         curr_tile_y * self.radar_tile_size_px,
+                                                         self.radar_tile_size_px, self.radar_tile_size_px))
 
                 # updating mines, in case of losing
                 elif self.hit_mine and self.board_array[curr_tile_y][curr_tile_x] == self.TILE_MINE:
                     self.board_for_display[curr_tile_y][curr_tile_x] = self.board_array[curr_tile_y][curr_tile_x]
+                    rect_color = self.radar_tile_colors[self.TILE_MINE]
+                    self.radar_surface.fill(rect_color, (curr_tile_x * self.radar_tile_size_px,
+                                                         curr_tile_y * self.radar_tile_size_px,
+                                                         self.radar_tile_size_px, self.radar_tile_size_px))
 
                 # updating blocks (hidden tiles)
                 elif self.shown_array[curr_tile_y][curr_tile_x] == self.HIDDEN:
                     self.board_for_display[curr_tile_y][curr_tile_x] = self.TILE_BLOCKED
+                    rect_color = self.radar_tile_colors[self.TILE_BLOCKED]
+                    self.radar_surface.fill(rect_color, (curr_tile_x * self.radar_tile_size_px,
+                                                         curr_tile_y * self.radar_tile_size_px,
+                                                         self.radar_tile_size_px, self.radar_tile_size_px))
 
                 # updating numbers
                 else:  # tile has been opened
                     self.board_for_display[curr_tile_y][curr_tile_x] = self.board_array[curr_tile_y][curr_tile_x]
+                    rect_color = self.radar_tile_colors[self.board_array[curr_tile_y][curr_tile_x]]
+                    self.radar_surface.fill(rect_color, (curr_tile_x * self.radar_tile_size_px,
+                                                         curr_tile_y * self.radar_tile_size_px,
+                                                         self.radar_tile_size_px, self.radar_tile_size_px))
+        print("DEBUG: end ", datetime.now())
+
+
 
     def display_game_board(self):
         # background
@@ -306,14 +333,17 @@ class Board:
                 curr_elem = self.board_for_display[tile_y][tile_x]
                 self.canvas.blit(self.tiles[curr_elem], (tile_pos_x, tile_pos_y))
 
+
+
     def display_radar(self):
-        for tile_y in range(self.num_of_tiles_y):
+        """for tile_y in range(self.num_of_tiles_y):
             tile_pos_y = tile_y * self.radar_tile_size_px + self.radar_start_pos_y
             for tile_x in range(self.num_of_tiles_x):
                 tile_pos_x = tile_x * self.radar_tile_size_px + self.radar_start_pos_x
                 curr_elem = self.board_for_display[tile_y][tile_x]
                 pygame.draw.rect(self.canvas, self.radar_tile_colors[curr_elem],
-                                 (tile_pos_x, tile_pos_y, self.radar_tile_size_px, self.radar_tile_size_px))
+                                 (tile_pos_x, tile_pos_y, self.radar_tile_size_px, self.radar_tile_size_px))"""
+        self.canvas.blit(self.radar_surface, (self.radar_start_pos_x, self.radar_start_pos_y))
 
         # window frame in radar with outline width of 2 pixels
         outline_width = 2
@@ -324,6 +354,7 @@ class Board:
         pygame.draw.rect(self.canvas, self.win_frame_color,
                          (win_frame_x, win_frame_y, self.win_frame_width, self.win_frame_heigth),
                          outline_width)
+
 
     def update_window_location(self, horizontal_displacement, vertical_displacement):
         # horizontal_displacement/vertical_displacement can be 1/-1 --> right/left, down/up

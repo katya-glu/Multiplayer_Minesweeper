@@ -5,6 +5,7 @@ from Board import Board
 import random
 import pygame
 import time
+from datetime import datetime
 import numpy as np
 import threading
 from kafka import KafkaConsumer
@@ -12,6 +13,7 @@ from kafka import KafkaProducer
 from kafka.admin import KafkaAdminClient
 from kafka.errors import (UnknownTopicOrPartitionError)
 import json
+from pytictoc import TicToc
 pygame.init()
 
 
@@ -119,11 +121,11 @@ def kafka_consumer(topic_name):
             if msg == 'joining':
                 #print('joining')
                 connected_players_num += 1
-                print('joining msg received, num of players is ', connected_players_num)
+                #print('joining msg received, num of players is ', connected_players_num)
             if not run:
                 #print('killing kafka consumer')
                 connected_players_num -= 1
-                print('quitting msg received, num of players is ', connected_players_num)
+                #print('quitting msg received, num of players is ', connected_players_num)
                 break
 
         # if quit_val == None, game continues for user
@@ -149,6 +151,8 @@ def event_consumer(game_board, topic_name):
     kafka_consumer_thread = threading.Thread(target=kafka_consumer, args=[topic_name])
     kafka_consumer_thread.start()
 
+    #tictoc_timer = TicToc()
+    #tictoc_timer.tic()
     global run
     while run:
         if len(action_queue) != 0:
@@ -162,16 +166,28 @@ def event_consumer(game_board, topic_name):
                     game_board.game_started = True
                 game_board.update_game_state(from_local_producer, action_tile_x, action_tile_y, action_left_released,
                                              action_right_released)
+                #print("after update_game_state()")
 
+        #print("start ", datetime.now())
+        #tictoc_timer.toc('Section 1 took')
         game_board.update_board_for_display()
+        #print("after update_board_for_display() ", datetime.now())
+        #tictoc_timer.toc('Section 2 took', restart=True)
         game_board.display_game_board()
+        #print("after display_game_board() ", datetime.now())
+        #tictoc_timer.toc('Section 3 took', restart=True)
         if game_board.add_score:
             # TODO: fix bug - when pygame and highscore windows are open, if X is pressed in pygame win, all windows get stuck.
             # TODO: Detect click outside window from display HS func
             add_high_score(game_board, game_board.time, game_board.size_index)
         game_board.is_game_over()
         game_board.update_clock()
+        #tictoc_timer.toc('Section 4 took', restart=True)
         pygame.display.update()
+        #print("end ", datetime.now())
+        #print("after pygame.display.update()") TODO
+        #tictoc_timer.toc('Section 5 took', restart=True)
+        #tictoc_timer.toc(restart=True)
 
     #print("event_consumer quitting")
 
@@ -201,6 +217,7 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
     global run
     run = True
 
+
     # kafka vars
     # each seed (seed == board setup) has its own topic, to pass messages only between prod/cons of this seed
     topic_name = str(random_seed)
@@ -217,12 +234,12 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
     global game_started
 
     if not game_started:
-        print("game_started: ", game_started)
+        #print("game_started: ", game_started)
         producer.send(topic_name, {'msg_type': 'control', 'msg': 'joining'})
         producer.flush()
         game_started = True
 
-    print("game_started: ", game_started)
+    #print("game_started: ", game_started)
     while run:
         """if left_released:
             print("clear left_released")"""
@@ -298,12 +315,15 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
 
                 # send to consumers clicks on game tiles only (x>=0, y>=0)
                 if game_board.is_mouse_over_window(mouse_position):
+
+
                     # get_tile_data_dict func adds a {'msg_type': 'data'} key-value pair
                     tile_data_dict = get_tile_data_dict(producer_id, tile_x, tile_y, left_released, right_released)
 
                     # TODO: test efficiency of sending bytes vs. json
                     producer.send(topic_name, tile_data_dict)
                     producer.flush()
+                    print("after message sending by producer")
 
                 # TODO: remove next 3 lines
                 #global action_queue
