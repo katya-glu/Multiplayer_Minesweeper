@@ -167,10 +167,11 @@ def event_consumer(game_board, topic_name):
                 game_board.update_game_state(from_local_producer, action_tile_x, action_tile_y, action_left_released,
                                              action_right_released)
                 #print("after update_game_state()")
+                game_board.update_board_for_display(action_tile_x, action_tile_y)
 
         #print("start ", datetime.now())
         #tictoc_timer.toc('Section 1 took')
-        game_board.update_board_for_display()
+        #game_board.update_board_for_display()
         #print("after update_board_for_display() ", datetime.now())
         #tictoc_timer.toc('Section 2 took', restart=True)
         game_board.display_game_board()
