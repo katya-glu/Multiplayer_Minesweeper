@@ -259,34 +259,30 @@ class Board:
         # updating flags
         if self.flags_array[curr_tile_y][curr_tile_x] == self.FLAGGED:
             self.board_for_display[curr_tile_y][curr_tile_x] = self.TILE_FLAG
-            rect_color = self.flag_color
-            self.radar_surface.fill(rect_color, (curr_tile_x * self.radar_tile_size_px,
-                                                 curr_tile_y * self.radar_tile_size_px,
-                                                 self.radar_tile_size_px, self.radar_tile_size_px))
+            self.radar_surface.fill(self.flag_color, (curr_tile_x * self.radar_tile_size_px,
+                                                      curr_tile_y * self.radar_tile_size_px,
+                                                      self.radar_tile_size_px, self.radar_tile_size_px))
 
         # updating mines, in case of losing
-        elif self.hit_mine and self.board_array[curr_tile_y][curr_tile_x] == self.TILE_MINE:
+        elif self.hit_mine and self.board_array[curr_tile_y][curr_tile_x] == self.LOSING_MINE_RED:
             self.board_for_display[curr_tile_y][curr_tile_x] = self.board_array[curr_tile_y][curr_tile_x]
-            rect_color = self.mine_color
-            self.radar_surface.fill(rect_color, (curr_tile_x * self.radar_tile_size_px,
-                                                 curr_tile_y * self.radar_tile_size_px,
-                                                 self.radar_tile_size_px, self.radar_tile_size_px))
+            self.radar_surface.fill(self.mine_color, (curr_tile_x * self.radar_tile_size_px,
+                                                      curr_tile_y * self.radar_tile_size_px,
+                                                      self.radar_tile_size_px, self.radar_tile_size_px))
 
         # updating blocks (hidden tiles)
         elif self.shown_array[curr_tile_y][curr_tile_x] == self.HIDDEN:
             self.board_for_display[curr_tile_y][curr_tile_x] = self.TILE_BLOCKED
-            rect_color = self.block_color
-            self.radar_surface.fill(rect_color, (curr_tile_x * self.radar_tile_size_px,
-                                                curr_tile_y * self.radar_tile_size_px,
-                                                self.radar_tile_size_px, self.radar_tile_size_px))
+            self.radar_surface.fill(self.block_color, (curr_tile_x * self.radar_tile_size_px,
+                                                       curr_tile_y * self.radar_tile_size_px,
+                                                       self.radar_tile_size_px, self.radar_tile_size_px))
 
         # updating numbers
         else:  # tile has been opened
             self.board_for_display[curr_tile_y][curr_tile_x] = self.board_array[curr_tile_y][curr_tile_x]
-            rect_color = self.numbers_color
-            self.radar_surface.fill(rect_color, (curr_tile_x * self.radar_tile_size_px,
-                                                 curr_tile_y * self.radar_tile_size_px,
-                                                 self.radar_tile_size_px, self.radar_tile_size_px))
+            self.radar_surface.fill(self.numbers_color, (curr_tile_x * self.radar_tile_size_px,
+                                                         curr_tile_y * self.radar_tile_size_px,
+                                                         self.radar_tile_size_px, self.radar_tile_size_px))
 
 
 
