@@ -209,7 +209,10 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
     np.random.seed(random_seed)
     game_board = Board(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines)
     game_board.place_objects_in_array()
-    game_board.count_num_of_touching_mines()
+    tictoc_timer = TicToc()
+    tictoc_timer.tic()
+    game_board.count_num_of_touching_mines2()
+    tictoc_timer.toc("count_num_of_touching_mines2")
     left_pressed = False
     right_pressed = False
     LEFT = 1
