@@ -91,6 +91,8 @@ class Board:
         self.game_started = False
         self.window_loc_x = 0
         self.window_loc_y = 0
+        self.mine_loc_x = float('inf')
+        self.mine_loc_y = float('inf')
         self.tile_offset_for_display_x = self.window_loc_x
         self.tile_offset_for_display_y = self.window_loc_y
         self.game_start_time = 0
@@ -347,14 +349,12 @@ class Board:
         self.canvas.blit(self.score_image,((5, 5)))
         score_text = self.clock_and_score_font.render('{0:03d}'.format(self.score), False, (255, 255, 255))
         self.canvas.blit(score_text, (8 + 16, 5))  # TODO: remove magic number
-        """self.canvas.blit(self.score_image, ((self.radar_start_pos_x + 2, self.radar_start_pos_y + self.radar_height + 6)))
-        score_text = self.clock_and_score_font.render('{0:03d}'.format(self.score), False, (255, 255, 255))
-        self.canvas.blit(score_text, (self.radar_start_pos_x + 5 + 16, self.radar_start_pos_y + self.radar_height + 6))  # TODO: remove magic number
-"""
+
         # display num of remaining closed tiles
         self.canvas.blit(self.tiles[self.TILE_BLOCKED], ((5, 28)))
-        score_text = self.clock_and_score_font.render('{0:03d}'.format(self.closed_tiles_num), False, (255, 255, 255))
-        self.canvas.blit(score_text, (8 + 16, 28))  # TODO: remove magic number
+        closed_tiles_num_text = self.clock_and_score_font.render('{:,}'.format(self.closed_tiles_num), False, (255, 255, 255))
+        #closed_tiles_num_text = self.clock_and_score_font.render('{}'.format(self.closed_tiles_num), False, (255, 255, 255))
+        self.canvas.blit(closed_tiles_num_text, (8 + 16, 28))  # TODO: remove magic number
 
         # display radar
         color = (128, 128, 128)
@@ -416,12 +416,18 @@ class Board:
     def update_score(self, points_to_update):
         self.score += points_to_update
 
+    def is_mine(self, tile_x, tile_y, left_click, right_click):
+        if left_click and not right_click and self.mines_array[tile_y][tile_x] == 1:
+            return True
+        else:
+            return False
+
     def is_game_over(self):
         font = pygame.font.SysFont("", 40)
-        if self.hit_mine:
+        """if self.hit_mine:
             self.game_over = True  # TODO: check if this is used, if not - remove
             lose_text = font.render("You lose", True, (255, 0, 0))
-            self.canvas.blit(lose_text, ((self.canvas_pixel_width - lose_text.get_width()) // 2, self.canvas_pixel_height // 2))
+            self.canvas.blit(lose_text, ((self.canvas_pixel_width - lose_text.get_width()) // 2, self.canvas_pixel_height // 2))"""
         if (self.mines_array != np.zeros(self.board_shape, dtype=np.uint8)).all() and \
             (self.flags_array == self.mines_array).all():
             self.game_over = True  # TODO: check if this is used, if not - remove

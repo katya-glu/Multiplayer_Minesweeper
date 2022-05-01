@@ -32,12 +32,15 @@ num_of_mines_large_board = int(0.2 * num_of_tiles_x_large_board * num_of_tiles_y
 
 # constants
 prod_id_max_val = (2 ** 32) - 1
+timeout_val = 5000
 
 # global vars
 action_queue = []
 run = True
 producer_id = 0
 game_started = False
+timeout = False
+timeout_counter = timeout_val
 
 def get_board_size(size_str):
     # function gets size_str from open_opening_window func in game_class file
@@ -218,7 +221,7 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
     LEFT = 1
     RIGHT = 3
 
-    global run
+    global run, timeout, timeout_counter, timeout_val
     run = True
 
 
@@ -249,6 +252,17 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
             print("clear left_released")"""
         left_released = False
         right_released = False
+
+        if timeout:     # timeout freezes game if mine was pressed
+            if timeout_counter > 0:
+                timeout_counter -= 1
+                pygame.time.delay(1)
+            else:
+                global timeout_val
+                timeout_counter = timeout_val
+                timeout = False
+                print("timeout finished at ", datetime.now())
+
         for event in pygame.event.get():
             mouse_position = pygame.mouse.get_pos()
 
@@ -280,13 +294,9 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
                game_board.is_mouse_over_new_game_button(mouse_position):
                 game_board.board_init()
                 game_board.place_objects_in_array()
-                game_board.count_num_of_touching_mines()
+                game_board.count_num_of_touching_mines2()
                 left_pressed = False
                 right_pressed = False
-
-            # if player hits a mine (loses), the game board freezes, not allowing further tile opening
-            elif game_board.hit_mine:
-                pass
 
             # detection of click on radar
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == LEFT and \
@@ -313,21 +323,24 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
 
                 pixel_x = event.pos[0]
                 pixel_y = event.pos[1]
-                tile_xy = game_board.pixel_xy_to_tile_xy(pixel_x, pixel_y)
-                tile_x = tile_xy[0]
-                tile_y = tile_xy[1]
+                tile_x, tile_y = game_board.pixel_xy_to_tile_xy(pixel_x, pixel_y)
 
-                # send to consumers clicks on game tiles only (x>=0, y>=0)
+                # send to consumers when not in hit_mine freeze
                 if game_board.is_mouse_over_window(mouse_position):
+                    if not timeout and not game_board.is_mine(tile_x, tile_y, left_released, right_released):
+                        # get_tile_data_dict func adds a {'msg_type': 'data'} key-value pair
+                        tile_data_dict = get_tile_data_dict(producer_id, tile_x, tile_y, left_released, right_released)
 
+                        # TODO: test efficiency of sending bytes vs. json
+                        producer.send(topic_name, tile_data_dict)
+                        producer.flush()
 
-                    # get_tile_data_dict func adds a {'msg_type': 'data'} key-value pair
-                    tile_data_dict = get_tile_data_dict(producer_id, tile_x, tile_y, left_released, right_released)
+                    elif not timeout and game_board.is_mine(tile_x, tile_y, left_released, right_released):
+                        action_queue.append([True, tile_x, tile_y, left_released, right_released]) # 0th index - from local producer
+                        timeout = True
+                        timeout_counter -= 1
+                        print("timeout started at ", datetime.now())
 
-                    # TODO: test efficiency of sending bytes vs. json
-                    producer.send(topic_name, tile_data_dict)
-                    producer.flush()
-                    print("after message sending by producer")
 
                 # TODO: remove next 3 lines
                 #global action_queue
