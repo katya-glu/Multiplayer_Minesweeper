@@ -13,6 +13,10 @@ class Board:
     # NO_FLAG = 0
     FLAGGED = 1
 
+    # mines array constants
+    # NO_MINE = 0
+    MINE = 1
+
     # board for display constants
     TILE_EMPTY = 0
     # TWO-EIGHT = 2-8
@@ -77,6 +81,11 @@ class Board:
         self.window_height      = self.window_num_of_tiles_y * self.tile_height
 
         self.score_image = pygame.image.load("coin2.png")
+        self.minesweeper_icon = pygame.image.load("minesweeper_icon.jpg")
+        self.minesweeper_icon = pygame.transform.scale(self.minesweeper_icon, (50, 50))
+        #self.explosion_icon = pygame.image.load("explosion2.jpg")
+        #self.nuclear_explosion_icon = pygame.image.load("nuclear_explosion.jpg")
+        #self.nuclear_explosion_icon = pygame.transform.scale(self.nuclear_explosion_icon, (100, 100))
 
         self.canvas_pixel_width = 0
         self.canvas_pixel_height = 0
@@ -295,41 +304,30 @@ class Board:
                     self.closed_tiles_num += 1
 
 
-
     def update_board_for_display(self, curr_tile_x, curr_tile_y):
         """
         Function updates board for display - the appropriate sprite index in tiles list is updated in board_for_display,
         based on the shown array
         """
-
-
         # updating flags
         if self.flags_array[curr_tile_y][curr_tile_x] == self.FLAGGED:
             self.board_for_display[curr_tile_y][curr_tile_x] = self.TILE_FLAG
-            self.radar_surface.fill(self.flag_color, (curr_tile_x * self.radar_tile_size_px,
-                                                      curr_tile_y * self.radar_tile_size_px,
-                                                      self.radar_tile_size_px, self.radar_tile_size_px))
+            self.update_radar_tile(curr_tile_x, curr_tile_y, self.flag_color)
 
         # updating mines, in case of losing
         elif self.hit_mine and self.board_array[curr_tile_y][curr_tile_x] == self.LOSING_MINE_RED:
             self.board_for_display[curr_tile_y][curr_tile_x] = self.board_array[curr_tile_y][curr_tile_x]
-            self.radar_surface.fill(self.mine_color, (curr_tile_x * self.radar_tile_size_px,
-                                                      curr_tile_y * self.radar_tile_size_px,
-                                                      self.radar_tile_size_px, self.radar_tile_size_px))
+            self.update_radar_tile(curr_tile_x, curr_tile_y, self.mine_color)
 
         # updating blocks (hidden tiles)
         elif self.shown_array[curr_tile_y][curr_tile_x] == self.HIDDEN:
             self.board_for_display[curr_tile_y][curr_tile_x] = self.TILE_BLOCKED
-            self.radar_surface.fill(self.block_color, (curr_tile_x * self.radar_tile_size_px,
-                                                       curr_tile_y * self.radar_tile_size_px,
-                                                       self.radar_tile_size_px, self.radar_tile_size_px))
+            self.update_radar_tile(curr_tile_x, curr_tile_y, self.block_color)
 
         # updating numbers
         else:  # tile has been opened
             self.board_for_display[curr_tile_y][curr_tile_x] = self.board_array[curr_tile_y][curr_tile_x]
-            self.radar_surface.fill(self.numbers_color, (curr_tile_x * self.radar_tile_size_px,
-                                                         curr_tile_y * self.radar_tile_size_px,
-                                                         self.radar_tile_size_px, self.radar_tile_size_px))
+            self.update_radar_tile(curr_tile_x, curr_tile_y, self.numbers_color)
 
 
     def display_game_board(self):
@@ -378,7 +376,6 @@ class Board:
                 self.canvas.blit(self.tiles[curr_elem], (tile_pos_x, tile_pos_y))
 
 
-
     def display_radar(self):
         self.canvas.blit(self.radar_surface, (self.radar_start_pos_x, self.radar_start_pos_y))
 
@@ -392,12 +389,27 @@ class Board:
                          (win_frame_x, win_frame_y, self.win_frame_width, self.win_frame_heigth),
                          outline_width)
 
+
     def display_timeout_msg(self):
-        timeout_font = pygame.font.SysFont("", 30)
-        timeout_text = timeout_font.render('Timeout', True, (255, 0, 0))
-        self.canvas.blit(timeout_text,
+        timeout_background = pygame.Surface((self.window_width, self.window_height))
+        timeout_background.set_alpha(128)
+        timeout_background.fill((255, 255, 255))
+        self.canvas.blit(timeout_background, (self.window_start_pos_x, self.window_start_pos_y))
+        #timeout_font = pygame.font.SysFont("", 30)
+        #timeout_text = timeout_font.render('Timeout', True, (255, 0, 0))
+        self.canvas.blit(self.minesweeper_icon,
+                         ((self.window_width - self.minesweeper_icon.get_width()) // 2, self.delta_from_top_y +
+                          (self.window_height - self.minesweeper_icon.get_height()) // 2))
+        """self.canvas.blit(timeout_text,
                          ((self.window_width - timeout_text.get_width()) // 2, self.delta_from_top_y +
-                          (self.window_height - timeout_text.get_height()) // 2))
+                          (self.window_height - timeout_text.get_height()) // 2))"""
+
+
+    def update_radar_tile(self, tile_x, tile_y, color):
+        self.radar_surface.fill(color, (tile_x * self.radar_tile_size_px,
+                                        tile_y * self.radar_tile_size_px,
+                                        self.radar_tile_size_px, self.radar_tile_size_px))
+
 
     def update_window_location(self, horizontal_displacement, vertical_displacement):
         # horizontal_displacement/vertical_displacement can be 1/-1 --> right/left, down/up
@@ -409,6 +421,7 @@ class Board:
         if (new_window_loc_y >= 0) and (new_window_loc_y <= self.num_of_tiles_y - self.window_num_of_tiles_y):
             self.window_loc_y = new_window_loc_y
 
+
     def update_clock(self):
         if self.game_started and self.time < 999 and not self.game_over:
             # print(self.is_game_over())
@@ -416,8 +429,10 @@ class Board:
             time_from_start = int(curr_time - self.game_start_time)
             self.time = time_from_start
 
+
     def update_score(self, points_to_update):
         self.score += points_to_update
+
 
     def close_opened_mine_tile(self):
         self.hit_mine = False   # func is called when hit mine timeout has passed
@@ -427,13 +442,22 @@ class Board:
         self.update_board_for_display(self.mine_loc_x, self.mine_loc_y)
 
 
+    def is_flag_correct(self, tile_x, tile_y, left_click, right_click):
+        if right_click and not left_click and self.flags_array[tile_y][tile_x] == self.FLAGGED \
+                       and self.mines_array[tile_y][tile_x] == self.MINE:
+            return True
+        else:
+            return False
+
+
     def is_mine(self, tile_x, tile_y, left_click, right_click):
-        if left_click and not right_click and self.mines_array[tile_y][tile_x] == 1:
+        if left_click and not right_click and self.mines_array[tile_y][tile_x] == self.MINE:
             self.mine_loc_x = tile_x
             self.mine_loc_y = tile_y
             return True
         else:
             return False
+
 
     def is_game_over(self):
         font = pygame.font.SysFont("", 40)
@@ -450,17 +474,18 @@ class Board:
                 self.win = True
                 self.add_score = True
 
+
     def is_mouse_over_new_game_button(self, mouse_position):
         # function decides whether the mouse is located over the new game button
         new_game_button_x = (self.canvas_pixel_width - self.new_button_icon.get_width()) // 2
         new_game_button_y = 2
         new_game_button_width = new_game_button_x + self.new_button_icon.get_width()
         new_game_button_height = new_game_button_y + self.new_button_icon.get_height()
-        if mouse_position[0] > new_game_button_x and mouse_position[0] < new_game_button_width:
-            if mouse_position[1] > new_game_button_y and mouse_position[1] < new_game_button_height:
-                return True
-        else:
-            return False # TODO: refactor
+        return (mouse_position[0] >= new_game_button_x and
+                mouse_position[0] <= new_game_button_width and
+                mouse_position[1] >= new_game_button_y and
+                mouse_position[1] <= new_game_button_height)
+
 
     def is_mouse_over_radar(self, mouse_position):
         return (mouse_position[0] >= self.radar_start_pos_x and
@@ -468,11 +493,13 @@ class Board:
                 mouse_position[1] >= self.radar_start_pos_y and
                 mouse_position[1] <= self.radar_start_pos_y + self.radar_height)
 
+
     def is_mouse_over_window(self, mouse_position):
         return (mouse_position[0] >= self.window_start_pos_x and
                 mouse_position[0] <= self.window_start_pos_x + self.window_width and
                 mouse_position[1] >= self.window_start_pos_y and
                 mouse_position[1] <= self.window_start_pos_y + self.window_height)
+
 
     def radar_pixel_xy_to_new_window_loc(self, mouse_position):
         mouse_relative_pos_x = mouse_position[0] - self.radar_start_pos_x

@@ -278,21 +278,17 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
 
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_LEFT:
-                    print("left key pressed")
                     game_board.update_window_location(-1, 0)
-                    print("window location x is: ", game_board.window_loc_x)
+                    #print("window location x is: ", game_board.window_loc_x)
                 if event.key == pygame.K_RIGHT:
-                    print("right key pressed")
                     game_board.update_window_location(1, 0)
-                    print("window location x is: ", game_board.window_loc_x)
+                    #print("window location x is: ", game_board.window_loc_x)
                 if event.key == pygame.K_UP:
-                    print("up key pressed")
                     game_board.update_window_location(0, -1)
-                    print("window location y is: ", game_board.window_loc_y)
+                    #print("window location y is: ", game_board.window_loc_y)
                 if event.key == pygame.K_DOWN:
-                    print("down key pressed")
                     game_board.update_window_location(0, 1)
-                    print("window location y is: ", game_board.window_loc_y)
+                    #print("window location y is: ", game_board.window_loc_y)
 
             # new game button pressed
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == LEFT and \
@@ -332,7 +328,8 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
 
                 # send to consumers when not in hit_mine freeze
                 if game_board.is_mouse_over_window(mouse_position):
-                    if not timeout and not game_board.is_mine(tile_x, tile_y, left_released, right_released):
+                    if not timeout and not game_board.is_mine(tile_x, tile_y, left_released, right_released) \
+                                   and game_board.is_flag_correct(tile_x, tile_y, left_released, right_released):
                         # get_tile_data_dict func adds a {'msg_type': 'data'} key-value pair
                         tile_data_dict = get_tile_data_dict(producer_id, tile_x, tile_y, left_released, right_released)
 
@@ -345,6 +342,10 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
                         timeout = True
                         timeout_counter -= 1
                         print("timeout started at ", datetime.now())
+
+                    elif not timeout and not game_board.is_flag_correct(tile_x, tile_y, left_released, right_released):
+                        action_queue.append([True, tile_x, tile_y, left_released, right_released]) # 0th index - from local producer
+
 
 
                 # TODO: remove next 3 lines
