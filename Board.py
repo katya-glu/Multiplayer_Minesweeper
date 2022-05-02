@@ -267,7 +267,7 @@ class Board:
                         self.update_score(self.hit_mine_points)
             elif left_click and self.board_array[tile_y][tile_x] != self.TILE_EMPTY:
                 self.shown_array[tile_y][tile_x] = self.SHOWN
-                if self.board_array[tile_y][tile_x] == self.TILE_MINE:
+                if self.board_array[tile_y][tile_x] == self.TILE_MINE or self.board_array[tile_y][tile_x] == self.LOSING_MINE_RED:
                     self.hit_mine = True
                     self.board_array[tile_y][tile_x] = self.LOSING_MINE_RED
                     if from_local_producer:
@@ -392,19 +392,22 @@ class Board:
                          (win_frame_x, win_frame_y, self.win_frame_width, self.win_frame_heigth),
                          outline_width)
 
+    def display_timeout_msg(self):
+        timeout_font = pygame.font.SysFont("", 30)
+        timeout_text = timeout_font.render('Timeout', True, (255, 0, 0))
+        self.canvas.blit(timeout_text,
+                         ((self.window_width - timeout_text.get_width()) // 2, self.delta_from_top_y +
+                          (self.window_height - timeout_text.get_height()) // 2))
 
     def update_window_location(self, horizontal_displacement, vertical_displacement):
         # horizontal_displacement/vertical_displacement can be 1/-1 --> right/left, down/up
         # window location is in tiles, not pixels
-        print("update window location function called")
         new_window_loc_x = self.window_loc_x + horizontal_displacement
         new_window_loc_y = self.window_loc_y + vertical_displacement
         if (new_window_loc_x >= 0) and (new_window_loc_x <= self.num_of_tiles_x - self.window_num_of_tiles_x):
             self.window_loc_x = new_window_loc_x
-            print("window_loc_x updated")
         if (new_window_loc_y >= 0) and (new_window_loc_y <= self.num_of_tiles_y - self.window_num_of_tiles_y):
             self.window_loc_y = new_window_loc_y
-            print("window_loc_y updated")
 
     def update_clock(self):
         if self.game_started and self.time < 999 and not self.game_over:
@@ -416,8 +419,18 @@ class Board:
     def update_score(self, points_to_update):
         self.score += points_to_update
 
+    def close_opened_mine_tile(self):
+        self.hit_mine = False   # func is called when hit mine timeout has passed
+        """self.shown_array[self.mine_loc_y][self.mine_loc_x] = self.HIDDEN
+        self.board_for_display[self.mine_loc_y][self.mine_loc_x] = self.TILE_BLOCKED"""
+        self.shown_array[self.mine_loc_y][self.mine_loc_x] = self.HIDDEN
+        self.update_board_for_display(self.mine_loc_x, self.mine_loc_y)
+
+
     def is_mine(self, tile_x, tile_y, left_click, right_click):
         if left_click and not right_click and self.mines_array[tile_y][tile_x] == 1:
+            self.mine_loc_x = tile_x
+            self.mine_loc_y = tile_y
             return True
         else:
             return False

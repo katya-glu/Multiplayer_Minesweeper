@@ -184,6 +184,9 @@ def event_consumer(game_board, topic_name):
             # TODO: fix bug - when pygame and highscore windows are open, if X is pressed in pygame win, all windows get stuck.
             # TODO: Detect click outside window from display HS func
             add_high_score(game_board, game_board.time, game_board.size_index)
+        global timeout
+        if timeout:
+            game_board.display_timeout_msg()
         game_board.is_game_over()
         game_board.update_clock()
         #tictoc_timer.toc('Section 4 took', restart=True)
@@ -255,12 +258,14 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
 
         if timeout:     # timeout freezes game if mine was pressed
             if timeout_counter > 0:
+                #game_board.display_timeout_msg()
                 timeout_counter -= 1
                 pygame.time.delay(1)
             else:
                 global timeout_val
                 timeout_counter = timeout_val
                 timeout = False
+                game_board.close_opened_mine_tile()
                 print("timeout finished at ", datetime.now())
 
         for event in pygame.event.get():
