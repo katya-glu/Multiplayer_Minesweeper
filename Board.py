@@ -10,7 +10,7 @@ class Board:
     SHOWN = 1
 
     # flags array constants
-    # NO_FLAG = 0
+    NO_FLAG = 0
     FLAGGED = 1
 
     # mines array constants
@@ -30,6 +30,12 @@ class Board:
     # score constants
     hit_mine_points = -10
     open_tile_points = 1
+    correct_flag_points = 10
+
+    # error constants
+    MINE_ERROR = True
+    FLAG_ERROR = False
+    timeout_val_ms = 5000
 
     # window constants
     window_num_of_tiles_x_var = 20
@@ -100,8 +106,13 @@ class Board:
         self.game_started = False
         self.window_loc_x = 0
         self.window_loc_y = 0
-        self.mine_loc_x = float('inf')
-        self.mine_loc_y = float('inf')
+
+        self.timeout = False
+        self.timeout_counter = self.timeout_val_ms
+        self.error_loc_x = 0
+        self.error_loc_y = 0
+        self.error_type = ""
+
         self.tile_offset_for_display_x = self.window_loc_x
         self.tile_offset_for_display_y = self.window_loc_y
         self.game_start_time = 0
@@ -136,7 +147,8 @@ class Board:
         mines_array = joined_array.reshape(self.board_shape)
         self.mines_array = mines_array.astype(np.uint8)
 
-    def count_num_of_touching_mines(self):
+    # replaced with faster implementation
+    """def count_num_of_touching_mines(self):
         # function receives an array with mines locations, calculates how many mines touch each empty cell
         padded_mines_array = np.pad(self.mines_array, (1, 1))
         for y in range(1, self.num_of_tiles_y + 1):
@@ -144,11 +156,10 @@ class Board:
                 if padded_mines_array[y][x] == 0:
                     self.neighbours_array[y - 1][x - 1] = np.sum(
                         padded_mines_array[y - 1:y + 2, x - 1:x + 2])  # sum elements around curr position
-        self.board_array = self.neighbours_array + self.TILE_MINE * self.mines_array
+        self.board_array = self.neighbours_array + self.TILE_MINE * self.mines_array"""
 
-    def count_num_of_touching_mines2(self):
+    def count_num_of_touching_mines(self):
         padded_mines_array = np.pad(self.mines_array, (1, 1))
-        #print(padded_mines_array.dtype)
         sum = np.zeros(padded_mines_array.shape)
         sum += padded_mines_array
         padded_array1 = np.roll(padded_mines_array, -1, axis=0)  # n
@@ -169,14 +180,9 @@ class Board:
         sum += padded_array2
         inverse_padded_array = np.logical_not(padded_mines_array)
         multiplication_result = np.multiply(inverse_padded_array, sum)
-        #print(self.neighbours_array.dtype)
         self.neighbours_array = multiplication_result[1:-1, 1:-1]
-        #print(self.neighbours_array.dtype)
         self.neighbours_array = self.neighbours_array.astype(np.uint8)
-        #print(self.neighbours_array.dtype)
-
         self.board_array = self.neighbours_array + self.TILE_MINE * self.mines_array
-        #print(self.board_array.dtype)
 
 
     def pixel_xy_to_tile_xy(self, pixel_x, pixel_y):
@@ -296,12 +302,14 @@ class Board:
 
                 if from_local_producer:
                     self.update_score(self.open_tile_points * num_of_open_tiles)
-            elif right_click:
-                self.flags_array[tile_y][tile_x] = self.FLAGGED - self.flags_array[tile_y][tile_x]  # toggle flag on/off
-                if self.flags_array[tile_y][tile_x] == self.FLAGGED:    # flag added
-                    self.closed_tiles_num -= 1
-                else:                                                   # flag removed
-                    self.closed_tiles_num += 1
+            elif right_click and self.flags_array[tile_y][tile_x] == self.NO_FLAG:
+                self.flags_array[tile_y][tile_x] = self.FLAGGED
+                self.closed_tiles_num -= 1
+                if from_local_producer:
+                    if self.mines_array[tile_y][tile_x] == self.MINE:   # flagged correctly
+                        self.update_score(self.correct_flag_points)
+                    else:                                               # flagged incorrectly
+                        self.update_score(self.hit_mine_points)
 
 
     def update_board_for_display(self, curr_tile_x, curr_tile_y):
@@ -433,30 +441,46 @@ class Board:
     def update_score(self, points_to_update):
         self.score += points_to_update
 
+    def start_timeout(self, tile_x, tile_y, error_type):
+        self.timeout = True
+        self.error_loc_x = tile_x
+        self.error_loc_y = tile_y
+        self.error_type = error_type
 
-    def close_opened_mine_tile(self):
-        self.hit_mine = False   # func is called when hit mine timeout has passed
-        """self.shown_array[self.mine_loc_y][self.mine_loc_x] = self.HIDDEN
-        self.board_for_display[self.mine_loc_y][self.mine_loc_x] = self.TILE_BLOCKED"""
-        self.shown_array[self.mine_loc_y][self.mine_loc_x] = self.HIDDEN
-        self.update_board_for_display(self.mine_loc_x, self.mine_loc_y)
-
-
-    def is_flag_correct(self, tile_x, tile_y, left_click, right_click):
-        if right_click and not left_click and self.flags_array[tile_y][tile_x] == self.FLAGGED \
-                       and self.mines_array[tile_y][tile_x] == self.MINE:
-            return True
+    def dec_timeout_counter(self):
+        #print("dec_timeout_counter ", self.timeout_counter)
+        if self.timeout_counter > 0:
+            #self.display_timeout_msg()
+            self.timeout_counter -= 1
+            pygame.time.delay(1)
         else:
-            return False
+            self.timeout_counter = self.timeout_val_ms
+            self.timeout = False
+            self.close_opened_mine_or_flag_tile()
+            print("timeout finished at ", datetime.now())
+
+    def close_opened_mine_or_flag_tile(self):
+        if self.error_type == self.MINE_ERROR:
+            self.hit_mine = False   # func is called when hit mine timeout has passed
+            self.shown_array[self.error_loc_y][self.error_loc_x] = self.HIDDEN
+            self.update_board_for_display(self.error_loc_x, self.error_loc_y)
+            self.error_type = ""
+        elif self.error_type == self.FLAG_ERROR:
+            self.flags_array[self.error_loc_y][self.error_loc_x] = self.NO_FLAG
+            self.update_board_for_display(self.error_loc_x, self.error_loc_y)
+            self.error_type = ""
 
 
-    def is_mine(self, tile_x, tile_y, left_click, right_click):
-        if left_click and not right_click and self.mines_array[tile_y][tile_x] == self.MINE:
-            self.mine_loc_x = tile_x
-            self.mine_loc_y = tile_y
-            return True
-        else:
-            return False
+
+    def is_wrong_right_click(self, tile_x, tile_y, left_click, right_click):
+        # right only click, not on mine, on closed tile
+        return (right_click and not left_click and
+                self.mines_array[tile_y][tile_x] != self.MINE and
+                self.shown_array[tile_y][tile_x] == self.HIDDEN)
+
+
+    def is_left_click_on_mine(self, tile_x, tile_y, left_click, right_click):
+        return (left_click and not right_click and self.mines_array[tile_y][tile_x] == self.MINE)
 
 
     def is_game_over(self):

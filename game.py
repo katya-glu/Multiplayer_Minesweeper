@@ -39,8 +39,6 @@ action_queue = []
 run = True
 producer_id = 0
 game_started = False
-timeout = False
-timeout_counter = timeout_val
 
 def get_board_size(size_str):
     # function gets size_str from open_opening_window func in game_class file
@@ -184,8 +182,7 @@ def event_consumer(game_board, topic_name):
             # TODO: fix bug - when pygame and highscore windows are open, if X is pressed in pygame win, all windows get stuck.
             # TODO: Detect click outside window from display HS func
             add_high_score(game_board, game_board.time, game_board.size_index)
-        global timeout
-        if timeout:
+        if game_board.timeout:
             game_board.display_timeout_msg()
         game_board.is_game_over()
         game_board.update_clock()
@@ -217,7 +214,7 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
     game_board.place_objects_in_array()
     tictoc_timer = TicToc()
     tictoc_timer.tic()
-    game_board.count_num_of_touching_mines2()
+    game_board.count_num_of_touching_mines()
     tictoc_timer.toc("count_num_of_touching_mines2")
     left_pressed = False
     right_pressed = False
@@ -256,17 +253,8 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
         left_released = False
         right_released = False
 
-        if timeout:     # timeout freezes game if mine was pressed
-            if timeout_counter > 0:
-                #game_board.display_timeout_msg()
-                timeout_counter -= 1
-                pygame.time.delay(1)
-            else:
-                global timeout_val
-                timeout_counter = timeout_val
-                timeout = False
-                game_board.close_opened_mine_tile()
-                print("timeout finished at ", datetime.now())
+        if game_board.timeout:     # timeout freezes game if mine was pressed
+            game_board.dec_timeout_counter()
 
         for event in pygame.event.get():
             mouse_position = pygame.mouse.get_pos()
@@ -279,23 +267,19 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_LEFT:
                     game_board.update_window_location(-1, 0)
-                    #print("window location x is: ", game_board.window_loc_x)
                 if event.key == pygame.K_RIGHT:
                     game_board.update_window_location(1, 0)
-                    #print("window location x is: ", game_board.window_loc_x)
                 if event.key == pygame.K_UP:
                     game_board.update_window_location(0, -1)
-                    #print("window location y is: ", game_board.window_loc_y)
                 if event.key == pygame.K_DOWN:
                     game_board.update_window_location(0, 1)
-                    #print("window location y is: ", game_board.window_loc_y)
 
             # new game button pressed
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == LEFT and \
                game_board.is_mouse_over_new_game_button(mouse_position):
                 game_board.board_init()
                 game_board.place_objects_in_array()
-                game_board.count_num_of_touching_mines2()
+                game_board.count_num_of_touching_mines()
                 left_pressed = False
                 right_pressed = False
 
@@ -327,31 +311,23 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
                 tile_x, tile_y = game_board.pixel_xy_to_tile_xy(pixel_x, pixel_y)
 
                 # send to consumers when not in hit_mine freeze
-                if game_board.is_mouse_over_window(mouse_position):
-                    if not timeout and not game_board.is_mine(tile_x, tile_y, left_released, right_released) \
-                                   and game_board.is_flag_correct(tile_x, tile_y, left_released, right_released):
-                        # get_tile_data_dict func adds a {'msg_type': 'data'} key-value pair
-                        tile_data_dict = get_tile_data_dict(producer_id, tile_x, tile_y, left_released, right_released)
+                if game_board.is_mouse_over_window(mouse_position) and not game_board.timeout:
+                    # wrong left click (on mine)
+                    if game_board.is_left_click_on_mine(tile_x, tile_y, left_released, right_released):
+                        action_queue.append([True, tile_x, tile_y, left_released, right_released]) # 0th index - from local producer
+                        game_board.start_timeout(tile_x, tile_y, game_board.MINE_ERROR)
 
-                        # TODO: test efficiency of sending bytes vs. json
+                    # wrong right click (tile without mine was flagged)
+                    elif game_board.is_wrong_right_click(tile_x, tile_y, left_released, right_released):
+                        action_queue.append([True, tile_x, tile_y, left_released, right_released]) # 0th index - from local producer
+                        game_board.start_timeout(tile_x, tile_y, game_board.FLAG_ERROR)
+
+                    else:
+                        # get_tile_data_dict generates 'data' msg
+                        tile_data_dict = get_tile_data_dict(producer_id, tile_x, tile_y, left_released, right_released)
                         producer.send(topic_name, tile_data_dict)
                         producer.flush()
 
-                    elif not timeout and game_board.is_mine(tile_x, tile_y, left_released, right_released):
-                        action_queue.append([True, tile_x, tile_y, left_released, right_released]) # 0th index - from local producer
-                        timeout = True
-                        timeout_counter -= 1
-                        print("timeout started at ", datetime.now())
-
-                    elif not timeout and not game_board.is_flag_correct(tile_x, tile_y, left_released, right_released):
-                        action_queue.append([True, tile_x, tile_y, left_released, right_released]) # 0th index - from local producer
-
-
-
-                # TODO: remove next 3 lines
-                #global action_queue
-                #action_queue.append([tile_x, tile_y, left_released, right_released])
-                #print('appended to moves_queue:', tile_x, tile_y, left_released, right_released)
                 left_pressed = False
                 right_pressed = False
 
