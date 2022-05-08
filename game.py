@@ -59,12 +59,17 @@ def open_opening_window():   # TODO: add comments
     opening_window = Tk()
     opening_window.title("Opening window")
 
-    MODES = [("Small", "Small"), ("Medium","Medium"), ("Large", "Large")]
+    MODES = [("Small", "Small"), ("Medium", "Medium"), ("Large", "Large")]
     board_size = StringVar()
     board_size.set("Small")
 
     for mode, size in MODES:
         Radiobutton(opening_window, text=mode, variable=board_size, value=size).pack()
+
+    seed_description = Label(opening_window, text="Enter number: ")
+    seed_description.pack()
+    seed = Entry(opening_window, width=10)
+    seed.pack()
 
     def start_new_game():
         board_size_str = board_size.get()
@@ -77,9 +82,16 @@ def open_opening_window():   # TODO: add comments
         num_of_tiles_x = board_size_and_num_of_mines[0]
         num_of_tiles_y = board_size_and_num_of_mines[1]
         num_of_mines = board_size_and_num_of_mines[2]
-        opening_window.destroy()
-        main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines)
-        open_opening_window()
+        #opening_window.destroy()
+
+        seed_str = seed.get()
+        if seed_str.isdigit():
+            seed_int = int(seed_str)
+            opening_window.destroy()
+            main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines, seed_int)
+            open_opening_window()
+        else:
+            messagebox.showwarning("Invalid input", "Invalid input, please enter a whole number")
 
     def open_high_scores():
         if not high_scores.is_window_open():
@@ -90,11 +102,12 @@ def open_opening_window():   # TODO: add comments
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
             opening_window.destroy()
 
+
     start_game_button = Button(opening_window, text="Start game", command=start_new_game)
     start_game_button.pack()
 
-    high_scores_button = Button(opening_window, text="High scores", command=open_high_scores)
-    high_scores_button.pack()
+    #high_scores_button = Button(opening_window, text="High scores", command=open_high_scores)
+    #high_scores_button.pack()
 
     opening_window.protocol("WM_DELETE_WINDOW", on_closing)
     opening_window.mainloop()
@@ -202,13 +215,13 @@ def get_tile_data_dict(producer_id, tile_x, tile_y, left_released, right_release
             'right_released': right_released}
 
 
-def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add comments
+def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines, seed_int):  # TODO: add comments
     #print("main start, threads: {}".format( threading.active_count() ))
     global producer_id
     producer_id = random.randint(0, prod_id_max_val)  # needs to come before random seed, to get unique producer_id
 
     # TODO: add Tkinter functionality to choose seed
-    random_seed = 2     # random_seed generates a specific board setup for all users who enter this seed
+    random_seed = seed_int     # random_seed generates a specific board setup for all users who enter this seed
     np.random.seed(random_seed)
     game_board = Board(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines)
     game_board.place_objects_in_array()
@@ -311,7 +324,8 @@ def main(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines):  # TODO: add
                 tile_x, tile_y = game_board.pixel_xy_to_tile_xy(pixel_x, pixel_y)
 
                 # send to consumers when not in hit_mine freeze
-                if game_board.is_mouse_over_window(mouse_position) and not game_board.timeout:
+                if game_board.is_mouse_over_window(mouse_position) and not game_board.timeout and \
+                   game_board.is_valid_input(tile_x, tile_y, left_released, right_released):
                     # wrong left click (on mine)
                     if game_board.is_left_click_on_mine(tile_x, tile_y, left_released, right_released):
                         action_queue.append([True, tile_x, tile_y, left_released, right_released]) # 0th index - from local producer

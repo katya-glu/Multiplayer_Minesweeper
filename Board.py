@@ -89,6 +89,10 @@ class Board:
         self.score_image = pygame.image.load("coin2.png")
         self.minesweeper_icon = pygame.image.load("minesweeper_icon.jpg")
         self.minesweeper_icon = pygame.transform.scale(self.minesweeper_icon, (50, 50))
+        self.mistake_icon = pygame.image.load("mistake.png")
+        self.mistake_icon = pygame.transform.scale(self.mistake_icon, (200, 130))
+
+
         #self.explosion_icon = pygame.image.load("explosion2.jpg")
         #self.nuclear_explosion_icon = pygame.image.load("nuclear_explosion.jpg")
         #self.nuclear_explosion_icon = pygame.transform.scale(self.nuclear_explosion_icon, (100, 100))
@@ -193,7 +197,7 @@ class Board:
     def is_valid_input(self, tile_x, tile_y, left_click, right_click):
         """
         function checks whether the input is valid - click should be on a closed tile, left click opens tile, right
-        click toggles flag display
+        click puts flag
         """
         if left_click and right_click:  # TODO: add functionality for incorrectly marked flags(lose)
             if self.shown_array[tile_y][tile_x] == self.SHOWN:
@@ -214,10 +218,11 @@ class Board:
             if self.flags_array[tile_y][tile_x] == self.FLAGGED:
                 return False
             else:
-                #print("valid left click")
                 return True
-        if right_click and not left_click:
+        if right_click and not left_click and self.flags_array[tile_y][tile_x] == self.NO_FLAG:
             return True
+        if right_click and not left_click and self.flags_array[tile_y][tile_x] == self.FLAGGED:
+            return False
 
     def flood_fill(self, tile_x, tile_y, left_and_right_click): # TODO: return number of tiles opened
         # flood fill algorithm - https://en.wikipedia.org/wiki/Flood_fill
@@ -264,7 +269,7 @@ class Board:
 
     def update_game_state(self, from_local_producer, tile_x, tile_y, left_click, right_click):
         # function updates game state upon receiving valid input
-        if self.is_valid_input(tile_x, tile_y, left_click, right_click):  # shown_array[tile_y][tile_x] == self.HIDDEN
+        #if self.is_valid_input(tile_x, tile_y, left_click, right_click):  # shown_array[tile_y][tile_x] == self.HIDDEN
             if left_click and right_click:
                 padded_flags_array = np.pad(self.flags_array, (1, 1))
                 padded_mines_array = np.pad(self.mines_array, (1, 1))
@@ -405,9 +410,11 @@ class Board:
         self.canvas.blit(timeout_background, (self.window_start_pos_x, self.window_start_pos_y))
         #timeout_font = pygame.font.SysFont("", 30)
         #timeout_text = timeout_font.render('Timeout', True, (255, 0, 0))
-        self.canvas.blit(self.minesweeper_icon,
-                         ((self.window_width - self.minesweeper_icon.get_width()) // 2, self.delta_from_top_y +
-                          (self.window_height - self.minesweeper_icon.get_height()) // 2))
+        self.mistake_icon.set_colorkey((255, 255, 255))
+
+        self.canvas.blit(self.mistake_icon,
+                         ((self.window_width - self.mistake_icon.get_width()) // 2, self.delta_from_top_y +
+                          (self.window_height - self.mistake_icon.get_height()) // 2))
         """self.canvas.blit(timeout_text,
                          ((self.window_width - timeout_text.get_width()) // 2, self.delta_from_top_y +
                           (self.window_height - timeout_text.get_height()) // 2))"""
