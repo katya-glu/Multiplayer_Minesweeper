@@ -45,7 +45,12 @@ class Board:
     win_frame_color = (0, 0, 255)
     mine_color = (220, 0, 0)
     flag_color = (30, 150, 30)
-    black = (0, 0, 0)
+
+    # radar constants
+    radar_margin_size_px = 3
+    outline_width = 2
+
+    ADD_ALL_NEIGHBOURS = True
 
     # list of tiles images. displayed according to index (value in board_for_display array)
     tiles = [pygame.image.load("empty.png"), pygame.image.load("one.png"), pygame.image.load("two.png"),
@@ -56,7 +61,7 @@ class Board:
 
     def __init__(self, size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines, tile_width=16, tile_height=16):
         pygame.init()
-        self.size_index = size_index  # 0=small, 1=medium, 2=large
+        #self.size_index = size_index  # 0=small, 1=medium, 2=large
         self.num_of_tiles_x = num_of_tiles_x
         self.num_of_tiles_y = num_of_tiles_y
         self.board_shape = (num_of_tiles_y, num_of_tiles_x)
@@ -69,17 +74,17 @@ class Board:
         self.window_num_of_tiles_y = min(self.window_num_of_tiles_y_var, self.num_of_tiles_y)
         # radar size is ~160 pixels. radar_tile_size_px is derived from #tiles, but in range[1, 5]
         self.radar_tile_size_px = min(5, max(1, int(160/max(self.num_of_tiles_x, self.num_of_tiles_y))))
-        self.radar_margin_size_px = 3
         self.radar_start_pos_x = self.window_num_of_tiles_x * self.tile_width + self.radar_margin_size_px
         self.radar_start_pos_y = self.delta_from_top_y + 3
         self.radar_width = self.num_of_tiles_x * self.radar_tile_size_px
         self.radar_height = self.num_of_tiles_y * self.radar_tile_size_px
+        self.win_frame_width = self.window_num_of_tiles_x * self.radar_tile_size_px + 2 * self.outline_width
+        self.win_frame_heigth = self.window_num_of_tiles_y * self.radar_tile_size_px + 2 * self.outline_width
         # self.radar_margin_size_px*2 - adding delta for margin on the left and right of the radar
         self.radar_width_w_margins = self.radar_width + self.radar_margin_size_px * 2
         self.radar_height_w_margins = self.radar_height + self.radar_margin_size_px * 2
         # radar_bg = pygame.image.load("radar_bg.png")
         self.radar_surface = pygame.Surface((self.radar_width, self.radar_height))
-        self.radar_surface.fill(self.block_color)
 
         self.window_start_pos_x = self.delta_from_left_x
         self.window_start_pos_y = self.delta_from_top_y
@@ -92,24 +97,18 @@ class Board:
         self.mistake_icon = pygame.image.load("mistake.png")
         self.mistake_icon = pygame.transform.scale(self.mistake_icon, (200, 130))
 
-
-        #self.explosion_icon = pygame.image.load("explosion2.jpg")
-        #self.nuclear_explosion_icon = pygame.image.load("nuclear_explosion.jpg")
-        #self.nuclear_explosion_icon = pygame.transform.scale(self.nuclear_explosion_icon, (100, 100))
-
         self.canvas_pixel_width = 0
         self.canvas_pixel_height = 0
         self.canvas = self.canvas_init()
         self.board_init()
 
+    # noinspection PyAttributeOutsideInit
     def board_init(self):
         self.win = False
         self.hit_mine = False
         self.game_over = False
         self.add_score = False
         self.game_started = False
-        self.window_loc_x = 0
-        self.window_loc_y = 0
 
         self.timeout = False
         self.timeout_counter = self.timeout_val_ms
@@ -117,14 +116,19 @@ class Board:
         self.error_loc_y = 0
         self.error_type = ""
 
+        self.window_loc_x = 0
+        self.window_loc_y = 0
         self.tile_offset_for_display_x = self.window_loc_x
         self.tile_offset_for_display_y = self.window_loc_y
+
         self.game_start_time = 0
         self.time = 0
+        self.clock_and_score_font = pygame.font.SysFont("consolas", 20)
         self.score = 0
         self.closed_tiles_num = self.num_of_tiles_x * self.num_of_tiles_y
+
         self.radar_surface.fill(self.block_color)
-        self.clock_and_score_font = pygame.font.SysFont("consolas", 20)
+
         self.shown_array = np.zeros(self.board_shape, dtype=np.uint8)
         self.flags_array = np.zeros(self.board_shape, dtype=np.uint8)
         self.mines_array = np.zeros(self.board_shape, dtype=np.uint8)
@@ -138,29 +142,17 @@ class Board:
         self.canvas_pixel_height = max(self.delta_from_top_y + self.window_height,
                                        self.delta_from_top_y + self.radar_height_w_margins)
         canvas = pygame.display.set_mode((self.canvas_pixel_width, self.canvas_pixel_height))
-        pygame.display.set_caption("Minesweeper")
+        pygame.display.set_caption("Multiplayer Minesweeper")
         return canvas
 
-    def place_objects_in_array(self):
-        # function shuffles an array in order to randomly generate locations of objects in the array
-        num_of_elements = self.num_of_tiles_x * self.num_of_tiles_y
-        ones_array = np.ones(self.num_of_mines, dtype=int)
-        zeros_array = np.zeros(num_of_elements - self.num_of_mines, dtype=int)
+    def gen_random_mines_array(self):
+        # function shuffles an array in order to randomly generate locations of mines in the array
+        num_of_tiles = self.num_of_tiles_x * self.num_of_tiles_y
+        ones_array = np.ones(self.num_of_mines, dtype=np.uint8)
+        zeros_array = np.zeros(num_of_tiles - self.num_of_mines, dtype=np.uint8)
         joined_array = np.concatenate((ones_array, zeros_array))
         np.random.shuffle(joined_array)
-        mines_array = joined_array.reshape(self.board_shape)
-        self.mines_array = mines_array.astype(np.uint8)
-
-    # replaced with faster implementation
-    """def count_num_of_touching_mines(self):
-        # function receives an array with mines locations, calculates how many mines touch each empty cell
-        padded_mines_array = np.pad(self.mines_array, (1, 1))
-        for y in range(1, self.num_of_tiles_y + 1):
-            for x in range(1, self.num_of_tiles_x + 1):
-                if padded_mines_array[y][x] == 0:
-                    self.neighbours_array[y - 1][x - 1] = np.sum(
-                        padded_mines_array[y - 1:y + 2, x - 1:x + 2])  # sum elements around curr position
-        self.board_array = self.neighbours_array + self.TILE_MINE * self.mines_array"""
+        self.mines_array = joined_array.reshape(self.board_shape).astype(np.uint8)
 
     def count_num_of_touching_mines(self):
         padded_mines_array = np.pad(self.mines_array, (1, 1))
@@ -168,25 +160,24 @@ class Board:
         sum += padded_mines_array
         padded_array1 = np.roll(padded_mines_array, -1, axis=0)  # n
         sum += padded_array1
-        padded_array2 = np.roll(padded_array1, -1, axis=1)  # nw
+        padded_array2 = np.roll(padded_array1, -1, axis=1)       # nw
         sum += padded_array2
-        padded_array2 = np.roll(padded_array1, 1, axis=1)  # ne
+        padded_array2 = np.roll(padded_array1, 1, axis=1)        # ne
         sum += padded_array2
         padded_array1 = np.roll(padded_mines_array, -1, axis=1)  # w
         sum += padded_array1
-        padded_array1 = np.roll(padded_mines_array, 1, axis=1)  # e
+        padded_array1 = np.roll(padded_mines_array, 1, axis=1)   # e
         sum += padded_array1
-        padded_array1 = np.roll(padded_mines_array, 1, axis=0)  # s
+        padded_array1 = np.roll(padded_mines_array, 1, axis=0)   # s
         sum += padded_array1
-        padded_array2 = np.roll(padded_array1, -1, axis=1)  # sw
+        padded_array2 = np.roll(padded_array1, -1, axis=1)       # sw
         sum += padded_array2
-        padded_array2 = np.roll(padded_array1, 1, axis=1)  # se
+        padded_array2 = np.roll(padded_array1, 1, axis=1)        # se
         sum += padded_array2
-        inverse_padded_array = np.logical_not(padded_mines_array)
+        inverse_padded_array  = np.logical_not(padded_mines_array)
         multiplication_result = np.multiply(inverse_padded_array, sum)
-        self.neighbours_array = multiplication_result[1:-1, 1:-1]
-        self.neighbours_array = self.neighbours_array.astype(np.uint8)
-        self.board_array = self.neighbours_array + self.TILE_MINE * self.mines_array
+        self.neighbours_array = multiplication_result[1:-1, 1:-1].astype(np.uint8)
+        self.board_array      = self.neighbours_array + self.TILE_MINE * self.mines_array
 
 
     def pixel_xy_to_tile_xy(self, pixel_x, pixel_y):
@@ -194,56 +185,47 @@ class Board:
         tile_y = ((pixel_y - self.delta_from_top_y) // self.tile_height) + self.tile_offset_for_display_y
         return tile_x, tile_y
 
-    def is_valid_input(self, tile_x, tile_y, left_click, right_click):
-        """
-        function checks whether the input is valid - click should be on a closed tile, left click opens tile, right
-        click puts flag
-        """
-        if left_click and right_click:  # TODO: add functionality for incorrectly marked flags(lose)
+    def is_valid_input(self, tile_x, tile_y, left_click, right_click):   # should click be ignored or not
+        # case1: left & right click is valid on open tile, when #adacent_flags == #adjacent_mines
+        if left_click and right_click:
             if self.shown_array[tile_y][tile_x] == self.SHOWN:
                 padded_flags_array = np.pad(self.flags_array, (1, 1))
                 padded_tile_x = tile_x + 1
                 padded_tile_y = tile_y + 1
                 num_of_flags_in_sub_array = np.sum(padded_flags_array[padded_tile_y - 1:padded_tile_y + 2,
-                                                   padded_tile_x - 1:padded_tile_x + 2])
-                if self.board_array[tile_y][tile_x] == num_of_flags_in_sub_array:
-                    return True
-                else:
-                    return False
-        if tile_x < 0 or tile_y < 0 or tile_x > (self.num_of_tiles_x - 1) or tile_y > (self.num_of_tiles_y - 1):
-            return False
+                                                                      padded_tile_x - 1:padded_tile_x + 2])
+                return (self.board_array[tile_y][tile_x] == num_of_flags_in_sub_array)
+
+        # case2: left or right click (not both) is not valid on open tile
         if self.shown_array[tile_y][tile_x] == self.SHOWN:
             return False
-        if left_click and not right_click:
-            if self.flags_array[tile_y][tile_x] == self.FLAGGED:
-                return False
-            else:
-                return True
-        if right_click and not left_click and self.flags_array[tile_y][tile_x] == self.NO_FLAG:
-            return True
-        if right_click and not left_click and self.flags_array[tile_y][tile_x] == self.FLAGGED:
-            return False
 
-    def flood_fill(self, tile_x, tile_y, left_and_right_click): # TODO: return number of tiles opened
+        # case3: left click is valid on non-flagged tile
+        if left_click and not right_click:
+            return (self.flags_array[tile_y][tile_x] != self.FLAGGED)
+
+        # case4: right click is valid on non-flag (closed tile) - only in multiplayer
+        if right_click and not left_click:
+            return self.flags_array[tile_y][tile_x] == self.NO_FLAG
+
+
+    def flood_fill(self, tile_x, tile_y, add_all_neighbours):
         # flood fill algorithm - https://en.wikipedia.org/wiki/Flood_fill
         # func is being called only if the opened tile is empty
         flood_fill_queue = []
         opened_tiles_num = 0    # counting num of open tiles for score update
-        if left_and_right_click:
+        if add_all_neighbours:   # happens on left & right click
             y_start = max(tile_y - 1, 0)
             y_end = min(tile_y + 2, self.num_of_tiles_y)
             x_start = max(tile_x - 1, 0)
             x_end = min(tile_x + 2, self.num_of_tiles_x)
-            for curr_tile_y in range(y_start, y_end):  # TODO: switch to numpy operation
+            for curr_tile_y in range(y_start, y_end):
                 for curr_tile_x in range(x_start, x_end):
-                    #print('left and right click ff loop')
                     if self.shown_array[curr_tile_y][curr_tile_x] == self.HIDDEN and \
-                            self.flags_array[curr_tile_y][curr_tile_x] != self.FLAGGED:
-                        #print('left and right click ff loop hidden condition')
+                       self.flags_array[curr_tile_y][curr_tile_x] != self.FLAGGED:
                         self.shown_array[curr_tile_y][curr_tile_x] = self.SHOWN
                         self.update_board_for_display(curr_tile_x, curr_tile_y)
                         opened_tiles_num += 1
-                        #print('left and right click opened tiles num increase')
                     flood_fill_queue.append((curr_tile_y, curr_tile_x))
         else:
             if self.shown_array[tile_y][tile_x] == self.HIDDEN:
@@ -253,8 +235,7 @@ class Board:
 
         while len(flood_fill_queue) != 0:
             curr_pos = flood_fill_queue.pop(0)
-            curr_y = curr_pos[0]
-            curr_x = curr_pos[1]
+            curr_y, curr_x = curr_pos
             if self.board_array[curr_y][curr_x] == self.TILE_EMPTY:
                 for neighbour_y in range(curr_y - 1, curr_y + 2):
                     for neighbour_x in range(curr_x - 1, curr_x + 2):
@@ -262,59 +243,67 @@ class Board:
                            (neighbour_x <= (self.num_of_tiles_x - 1) and neighbour_x >= 0):
                             if self.shown_array[neighbour_y][neighbour_x] == self.HIDDEN:
                                 flood_fill_queue.append((neighbour_y, neighbour_x))
-                                self.shown_array[neighbour_y][neighbour_x] = self.SHOWN  # all neighbours change to shown
+                                self.shown_array[neighbour_y][neighbour_x] = self.SHOWN # all neighbours change to shown
                                 self.update_board_for_display(neighbour_x, neighbour_y)
                                 opened_tiles_num += 1
         return opened_tiles_num
 
+    def all_adjacent_mines_are_flagged_correctly(self, tile_x, tile_y):
+        padded_flags_array = np.pad(self.flags_array, (1, 1))   # TODO: (performance bug - large arrays created)
+        padded_mines_array = np.pad(self.mines_array, (1, 1))   #   replace mines/flags_array with padded_*_array + adjast indices
+        padded_tile_x = tile_x + 1
+        padded_tile_y = tile_y + 1
+        return (padded_flags_array[padded_tile_y-1:padded_tile_y+2, padded_tile_x-1:padded_tile_x+2] ==
+                padded_mines_array[padded_tile_y-1:padded_tile_y+2, padded_tile_x-1:padded_tile_x+2]).all()
+
     def update_game_state(self, from_local_producer, tile_x, tile_y, left_click, right_click):
         # function updates game state upon receiving valid input
-        #if self.is_valid_input(tile_x, tile_y, left_click, right_click):  # shown_array[tile_y][tile_x] == self.HIDDEN
-            if left_click and right_click:
-                padded_flags_array = np.pad(self.flags_array, (1, 1))
-                padded_mines_array = np.pad(self.mines_array, (1, 1))
-                padded_tile_x = tile_x + 1
-                padded_tile_y = tile_y + 1
-                if (padded_flags_array[padded_tile_y - 1:padded_tile_y + 2, padded_tile_x - 1:padded_tile_x + 2]
-                        == padded_mines_array[padded_tile_y - 1:padded_tile_y + 2, padded_tile_x - 1:padded_tile_x + 2]).all():
-                    num_of_open_tiles = self.flood_fill(tile_x, tile_y, True)
-                    self.closed_tiles_num -= num_of_open_tiles
-                    if from_local_producer:
-                        self.update_score(self.open_tile_points * num_of_open_tiles)
-                else:
-                    self.hit_mine = True
-                    if from_local_producer:
-                        self.update_score(self.hit_mine_points)
-            elif left_click and self.board_array[tile_y][tile_x] != self.TILE_EMPTY:
-                self.shown_array[tile_y][tile_x] = self.SHOWN
-                if self.board_array[tile_y][tile_x] == self.TILE_MINE or self.board_array[tile_y][tile_x] == self.LOSING_MINE_RED:
-                    self.hit_mine = True
-                    self.board_array[tile_y][tile_x] = self.LOSING_MINE_RED
-                    if from_local_producer:
-                        self.update_score(self.hit_mine_points)
-                # update score if empty tile opened and not hit_mine
-                if from_local_producer and not self.hit_mine:
-                    self.update_score(self.open_tile_points)
-                    self.closed_tiles_num -= 1
-            elif left_click and self.board_array[tile_y][tile_x] == self.TILE_EMPTY:
-                #start_time = datetime.timestamp(datetime.now())
-                #print("DEBUG: start_time ", datetime.now())
-                num_of_open_tiles = self.flood_fill(tile_x, tile_y, False)
+        if left_click and right_click:
+            # open all neighbour tiles, if all adjacent mines are flagged correctly, increase score
+            if self.all_adjacent_mines_are_flagged_correctly(tile_x, tile_y):
+                num_of_open_tiles = self.flood_fill(tile_x, tile_y, self.ADD_ALL_NEIGHBOURS)
                 self.closed_tiles_num -= num_of_open_tiles
-                #end_time = datetime.timestamp(datetime.now())
-                #elapsed_time = end_time - start_time
-                #print("DEBUG: elapsed_time ", elapsed_time)
-
                 if from_local_producer:
                     self.update_score(self.open_tile_points * num_of_open_tiles)
-            elif right_click and self.flags_array[tile_y][tile_x] == self.NO_FLAG:
-                self.flags_array[tile_y][tile_x] = self.FLAGGED
-                self.closed_tiles_num -= 1
+            # adjacent mines flagged incorrectly - not needed in multiplayer minesweeper
+            """else:
+                self.hit_mine = True
                 if from_local_producer:
-                    if self.mines_array[tile_y][tile_x] == self.MINE:   # flagged correctly
-                        self.update_score(self.correct_flag_points)
-                    else:                                               # flagged incorrectly
-                        self.update_score(self.hit_mine_points)
+                    self.update_score(self.hit_mine_points)"""
+
+        # left click on non empty tile shows tile
+        elif left_click and self.board_array[tile_y][tile_x] != self.TILE_EMPTY:
+            self.shown_array[tile_y][tile_x] = self.SHOWN
+            # if left click on mine - change mine tile to red mine tile, decrease score
+            if self.board_array[tile_y][tile_x] == self.TILE_MINE or \
+               self.board_array[tile_y][tile_x] == self.LOSING_MINE_RED:
+                self.hit_mine = True
+                self.board_array[tile_y][tile_x] = self.LOSING_MINE_RED
+                if from_local_producer:
+                    self.update_score(self.hit_mine_points)
+
+            # update score if non empty tile opened and not hit_mine
+            if from_local_producer and not self.hit_mine:
+                self.update_score(self.open_tile_points)
+                self.closed_tiles_num -= 1
+
+        # call flood_fill func if left click on empty tile
+        elif left_click and self.board_array[tile_y][tile_x] == self.TILE_EMPTY:
+            num_of_open_tiles = self.flood_fill(tile_x, tile_y, False)
+            self.closed_tiles_num -= num_of_open_tiles
+
+            if from_local_producer:
+                self.update_score(self.open_tile_points * num_of_open_tiles)
+
+        # right click on empty tile puts flag, in multiplayer mineasweeper flag cannot be removed
+        elif right_click and self.flags_array[tile_y][tile_x] == self.NO_FLAG:
+            self.flags_array[tile_y][tile_x] = self.FLAGGED
+            self.closed_tiles_num -= 1
+            if from_local_producer:
+                if self.mines_array[tile_y][tile_x] == self.MINE:   # flagged correctly
+                    self.update_score(self.correct_flag_points)
+                else:                                               # flagged incorrectly
+                    self.update_score(self.hit_mine_points)
 
 
     def update_board_for_display(self, curr_tile_x, curr_tile_y):
@@ -343,14 +332,15 @@ class Board:
             self.update_radar_tile(curr_tile_x, curr_tile_y, self.numbers_color)
 
 
-    def display_game_board(self):
+    def display_game_board(self, display_new_button_icon):
         # background
         background_color = (0, 0, 0)
         self.canvas.fill(background_color)
 
         # display new game button
-        self.canvas.blit(self.new_button_icon,
-                         ((self.canvas_pixel_width - self.new_button_icon.get_width()) / 2, 2))  # TODO: remove magic number
+        if display_new_button_icon:
+            self.canvas.blit(self.new_button_icon,
+                            ((self.canvas_pixel_width - self.new_button_icon.get_width()) / 2, 2)) # TODO: remove magic number
 
         # display clock
         clock_text = self.clock_and_score_font.render('{0:03d}'.format(self.time), False, (255, 255, 255))
@@ -358,19 +348,19 @@ class Board:
 
         # display score
         self.canvas.blit(self.score_image,((5, 5)))
-        score_text = self.clock_and_score_font.render('{0:03d}'.format(self.score), False, (255, 255, 255))
+        score_text = self.clock_and_score_font.render('{0:03d}'.format(self.score), False, (255, 255, 255))  # TODO: remove magic number
         self.canvas.blit(score_text, (8 + 16, 5))  # TODO: remove magic number
 
         # display num of remaining closed tiles
         self.canvas.blit(self.tiles[self.TILE_BLOCKED], ((5, 28)))
-        closed_tiles_num_text = self.clock_and_score_font.render('{:,}'.format(self.closed_tiles_num), False, (255, 255, 255))
-        #closed_tiles_num_text = self.clock_and_score_font.render('{}'.format(self.closed_tiles_num), False, (255, 255, 255))
+        closed_tiles_num_text = self.clock_and_score_font.render('{:,}'.format(self.closed_tiles_num), False, (255, 255, 255))  # TODO: remove magic number
         self.canvas.blit(closed_tiles_num_text, (8 + 16, 28))  # TODO: remove magic number
 
         # display radar
-        color = (128, 128, 128)
+        color = (128, 128, 128)  # TODO: remove magic number
         pygame.draw.rect(self.canvas, color,
-                         (self.radar_start_pos_x - 2, self.radar_start_pos_y - 2, self.radar_width + 4, self.radar_height + 4), 2)
+                         (self.radar_start_pos_x-2, self.radar_start_pos_y-2,
+                          self.radar_width+4, self.radar_height+4), 2)  # TODO: remove magic number
         self.display_radar()
 
         # display board
@@ -378,7 +368,6 @@ class Board:
         min_tile_val_y = self.window_loc_y
         max_tile_val_x = self.window_loc_x + self.window_num_of_tiles_x
         max_tile_val_y = self.window_loc_y + self.window_num_of_tiles_y
-        #print("min_tile_val_x: {}, min_tile_val_y: {}, max_tile_val_x: {}, max_tile_val_y: {}".format(min_tile_val_x,min_tile_val_y,max_tile_val_x,max_tile_val_y))
         self.tile_offset_for_display_x = min_tile_val_x
         self.tile_offset_for_display_y = min_tile_val_y
         for tile_y in range(min_tile_val_y, max_tile_val_y):
@@ -390,35 +379,27 @@ class Board:
 
 
     def display_radar(self):
+        # draw radar surface
         self.canvas.blit(self.radar_surface, (self.radar_start_pos_x, self.radar_start_pos_y))
 
-        # window frame in radar with outline width of 2 pixels
-        outline_width = 2
-        win_frame_x = self.radar_start_pos_x + self.window_loc_x * self.radar_tile_size_px - outline_width
-        win_frame_y = self.radar_start_pos_y + self.window_loc_y * self.radar_tile_size_px - outline_width
-        self.win_frame_width = self.window_num_of_tiles_x * self.radar_tile_size_px + 2 * outline_width
-        self.win_frame_heigth = self.window_num_of_tiles_y * self.radar_tile_size_px + 2 * outline_width
+        # draw frame in radar according to window position
+        win_frame_x = self.radar_start_pos_x + self.window_loc_x * self.radar_tile_size_px - self.outline_width
+        win_frame_y = self.radar_start_pos_y + self.window_loc_y * self.radar_tile_size_px - self.outline_width
         pygame.draw.rect(self.canvas, self.win_frame_color,
                          (win_frame_x, win_frame_y, self.win_frame_width, self.win_frame_heigth),
-                         outline_width)
+                         self.outline_width)
 
 
-    def display_timeout_msg(self):
+    def display_timeout_icon(self):
         timeout_background = pygame.Surface((self.window_width, self.window_height))
         timeout_background.set_alpha(128)
         timeout_background.fill((255, 255, 255))
         self.canvas.blit(timeout_background, (self.window_start_pos_x, self.window_start_pos_y))
-        #timeout_font = pygame.font.SysFont("", 30)
-        #timeout_text = timeout_font.render('Timeout', True, (255, 0, 0))
         self.mistake_icon.set_colorkey((255, 255, 255))
 
         self.canvas.blit(self.mistake_icon,
                          ((self.window_width - self.mistake_icon.get_width()) // 2, self.delta_from_top_y +
                           (self.window_height - self.mistake_icon.get_height()) // 2))
-        """self.canvas.blit(timeout_text,
-                         ((self.window_width - timeout_text.get_width()) // 2, self.delta_from_top_y +
-                          (self.window_height - timeout_text.get_height()) // 2))"""
-
 
     def update_radar_tile(self, tile_x, tile_y, color):
         self.radar_surface.fill(color, (tile_x * self.radar_tile_size_px,
@@ -455,9 +436,7 @@ class Board:
         self.error_type = error_type
 
     def dec_timeout_counter(self):
-        #print("dec_timeout_counter ", self.timeout_counter)
         if self.timeout_counter > 0:
-            #self.display_timeout_msg()
             self.timeout_counter -= 1
             pygame.time.delay(1)
         else:
