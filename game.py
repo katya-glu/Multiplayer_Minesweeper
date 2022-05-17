@@ -17,9 +17,9 @@ pygame.init()
 
 
 # board size constants
-num_of_tiles_x_small_board = 13
-num_of_tiles_y_small_board = 15
-num_of_mines_small_board   = 40
+num_of_tiles_x_small_board = 40
+num_of_tiles_y_small_board = 40
+num_of_mines_small_board   = 1
 
 num_of_tiles_x_medium_board = 40
 num_of_tiles_y_medium_board = 40
@@ -47,6 +47,10 @@ action_queue = []
 run          = True
 producer_id  = 0
 game_started = False
+player_name = ""
+seed_str_for_cert = ""
+tiles_hidden = True
+tiles_shown = False
 
 
 def open_opening_window():   # TODO: add comments
@@ -63,6 +67,10 @@ def open_opening_window():   # TODO: add comments
     for mode, size in MODES:
         Radiobutton(opening_window, text=mode, variable=board_size, value=size).pack()
 
+    name_description = Label(opening_window, text="Enter name: ")
+    name_description.pack()
+    name = Entry(opening_window, width=10)
+    name.pack()
     seed_description = Label(opening_window, text="Enter number: ")
     seed_description.pack()
     seed = Entry(opening_window, width=10)
@@ -72,13 +80,32 @@ def open_opening_window():   # TODO: add comments
         board_size_str = board_size.get()
         size_index = int(board_size_str)
         seed_str = seed.get()
-        if seed_str.isdigit():
+        name_str = name.get()
+        if seed_str.isdigit() and name_str != "":
+            global player_name, seed_str_for_cert
+            seed_str_for_cert = seed_str
             seed_int = int(seed_str)
+            player_name = name_str
             opening_window.destroy()
-            main(size_index, seed_int)
+            main(size_index, seed_int, tiles_hidden)
             open_opening_window()
+        elif name_str == "":
+            messagebox.showwarning("Invalid input", "Invalid input, please enter your name")
         else:
             messagebox.showwarning("Invalid input", "Invalid input, please enter a whole number")
+
+    def is_valid_certificate(cert_str):
+        return cert_str.isdigit()   # TODO: add function to parse cert
+
+    def process_certificate():
+        cert_str = certificate.get()
+        if is_valid_certificate(cert_str):
+            cert_int = int(cert_str)
+            board_size_str = board_size.get()
+            size_index = int(board_size_str)
+            opening_window.destroy()
+            main(size_index, cert_int, tiles_shown)
+            open_opening_window()
 
     # TODO: consider adding multiplayer high-scores
     """def open_high_scores():
@@ -93,6 +120,14 @@ def open_opening_window():   # TODO: add comments
     start_game_button = Button(opening_window, text="Start game", command=start_new_game)
     start_game_button.pack()
 
+    certificate_description = Label(opening_window, text="Enter certificate: ")
+    certificate_description.pack()
+    certificate = Entry(opening_window, width=10)
+    certificate.pack()
+
+    enter_certificate_button = Button(opening_window, text="Process certificate", command=process_certificate)
+    enter_certificate_button.pack()
+
     # TODO: consider adding multiplayer high-scores (collect score from all current players)
     #high_scores_button = Button(opening_window, text="High scores", command=open_high_scores)
     #high_scores_button.pack()
@@ -104,6 +139,15 @@ def add_high_score(game_board, score, size_index):
     high_scores = HighScore(False, 10, [10, 5], [True, False], "high_scores.pkl")
     high_scores.add_new_high_score(score, size_index)
     game_board.add_score = False
+
+def show_certificate_code(game_board):
+    certficate_window = Tk()
+    certficate_window.title("Certificate")
+    global seed_str_for_cert, player_name
+    certificate_code = "{},{},{}".format(str(game_board.score), seed_str_for_cert, player_name)
+    certficate_label = Label(certficate_window, text=certificate_code)
+    certficate_label.pack()
+    certficate_window.mainloop()
 
 def kafka_consumer(topic_name):
     TOPIC_NAME = topic_name
@@ -170,9 +214,12 @@ def event_consumer(game_board, topic_name):
             add_high_score(game_board, game_board.time, game_board.size_index)"""
         if game_board.timeout:
             game_board.display_timeout_icon()
-        game_board.is_game_over()
+
         game_board.update_clock()
         pygame.display.update()
+        if game_board.is_game_over() and not game_board.game_over:
+            #show_certificate_code(game_board)
+            game_board.game_over = True
 
 
 def create_tile_data_dict(producer_id, tile_x, tile_y, left_released, right_released):
@@ -185,16 +232,18 @@ def create_tile_data_dict(producer_id, tile_x, tile_y, left_released, right_rele
             'right_released': right_released}
 
 
-def main(size_index, seed):  # TODO: add comments
+def main(size_index, seed, tiles_hidden):  # TODO: add comments
     #print("main start, threads: {}".format( threading.active_count() ))
     global producer_id
     producer_id = random.randint(0, prod_id_max_val)  # needs to come before random seed, to get unique producer_id
 
     np.random.seed(seed)   # random_seed generates a specific board setup for all users who enter this seed
     (num_of_tiles_x, num_of_tiles_y, num_of_mines) = board_info[size_index]
-    game_board = Board(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines)
+    game_board = Board(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines, tiles_hidden)
     game_board.gen_random_mines_array()
     game_board.count_num_of_touching_mines()
+    if not tiles_hidden:
+        game_board.update_finished_board_for_display()
     left_pressed = False
     right_pressed = False
 
