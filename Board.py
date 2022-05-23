@@ -40,11 +40,15 @@ class Board:
     # window constants
     window_num_of_tiles_x_var = 20
     window_num_of_tiles_y_var = 20
+    background_color = (0, 0, 0)
+    text_color = (255, 255, 255)
+    radar_outline_color = (128, 128, 128)
     block_color = (211, 211, 211)
     numbers_color = (180, 180, 180)
     win_frame_color = (0, 0, 255)
     mine_color = (220, 0, 0)
     flag_color = (30, 150, 30)
+
 
     # radar constants
     radar_margin_size_px = 3
@@ -91,11 +95,11 @@ class Board:
         self.window_width       = self.window_num_of_tiles_x * self.tile_width
         self.window_height      = self.window_num_of_tiles_y * self.tile_height
 
-        self.score_image = pygame.image.load("coin2.png")
-        self.minesweeper_icon = pygame.image.load("minesweeper_icon.jpg")
-        self.minesweeper_icon = pygame.transform.scale(self.minesweeper_icon, (50, 50))
+        self.score_icon = pygame.image.load("coin2.png")
         self.mistake_icon = pygame.image.load("mistake.png")
         self.mistake_icon = pygame.transform.scale(self.mistake_icon, (200, 130))
+        self.players_icon = pygame.image.load("players_16x16_icon.png")
+        #self.players_icon = pygame.transform.scale(self.players_icon, (22, 16))
 
         self.win_font = pygame.font.SysFont("", 40)
         self.win_text = self.win_font.render("You win", True, (255, 0, 0))
@@ -342,10 +346,9 @@ class Board:
         # func is called when player enters valid certificate (he finished the game previously)
         self.board_for_display = self.neighbours_array + self.mines_array * self.TILE_FLAG
 
-    def display_game_board(self, display_new_button_icon):
+    def display_game_board(self, display_new_button_icon, display_clock, num_of_players):
         # background
-        background_color = (0, 0, 0)
-        self.canvas.fill(background_color)
+        self.canvas.fill(self.background_color)
 
         # display new game button
         if display_new_button_icon:
@@ -353,24 +356,33 @@ class Board:
                             ((self.canvas_pixel_width - self.new_button_icon.get_width()) / 2, 2)) # TODO: remove magic number
 
         # display clock
-        clock_text = self.clock_and_score_font.render('{0:03d}'.format(self.time), False, (255, 255, 255))
-        self.canvas.blit(clock_text, (self.canvas_pixel_width - (clock_text.get_width() + 5), 5))  # TODO: remove magic number
+        if display_clock:
+            clock_text = self.clock_and_score_font.render('{0:03d}'.format(self.time), False, self.text_color)
+            self.canvas.blit(clock_text, (self.canvas_pixel_width - (clock_text.get_width() + 5), 5))  # TODO: remove magic number
 
         # display score
-        self.canvas.blit(self.score_image,((5, 5)))
-        score_text = self.clock_and_score_font.render('{:,}'.format(self.score), False, (255, 255, 255))  # TODO: remove magic number
+        self.canvas.blit(self.score_icon, ((5, 5)))
+        score_text = self.clock_and_score_font.render('{:,}'.format(self.score), False, self.text_color)
         self.canvas.blit(score_text, (8 + 16, 5))  # TODO: remove magic number
 
         # display num of remaining closed tiles
         self.canvas.blit(self.tiles[self.TILE_BLOCKED], ((5, 28)))
-        closed_tiles_num_text = self.clock_and_score_font.render('{:,}'.format(self.closed_tiles_num), False, (255, 255, 255))  # TODO: remove magic number
+        closed_tiles_num_text = self.clock_and_score_font.render('{:,}'.format(self.closed_tiles_num), False, self.text_color)
         self.canvas.blit(closed_tiles_num_text, (8 + 16, 28))  # TODO: remove magic number
 
+        # display num_of_players
+        num_of_players_text = self.clock_and_score_font.render('{:,}'.format(num_of_players), False, self.text_color)
+        self.canvas.blit(self.players_icon, (self.canvas_pixel_width - (num_of_players_text.get_width() + 16 + 10), 5))
+        # TODO: remove magic number
+        self.canvas.blit(num_of_players_text,
+                         (self.canvas_pixel_width - (num_of_players_text.get_width() + 5), 5))  # TODO: remove magic number
+
         # display radar
-        color = (128, 128, 128)  # TODO: remove magic number
+        color = self.radar_outline_color
         pygame.draw.rect(self.canvas, color,
-                         (self.radar_start_pos_x-2, self.radar_start_pos_y-2,
-                          self.radar_width+4, self.radar_height+4), 2)  # TODO: remove magic number
+                         (self.radar_start_pos_x-self.outline_width, self.radar_start_pos_y-self.outline_width,
+                          self.radar_width+2*self.outline_width, self.radar_height+2*self.outline_width),
+                          self.outline_width)
         self.display_radar()
 
         # display board
@@ -392,14 +404,6 @@ class Board:
             self.canvas.blit(self.win_text,
                             ((self.window_width - self.win_text.get_width()) // 2, self.delta_from_top_y +
                             (self.window_height - self.win_text.get_height()) // 2))
-
-
-    def display_winning_text(self):
-        font = pygame.font.SysFont("", 40)
-        win_text = font.render("You win", True, (255, 0, 0))
-        self.canvas.blit(win_text,
-                         ((self.window_width - win_text.get_width()) // 2, self.delta_from_top_y +
-                          (self.window_height - win_text.get_height()) // 2))
 
     def display_radar(self):
         # draw radar surface

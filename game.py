@@ -42,6 +42,7 @@ class MinesweeperMain:
     MEDIUM = 1
     LARGE  = 2
     display_new_button_icon = False     # no new game button multiplayer
+    display_clock = False
     tiles_hidden = True
     tiles_shown = False
 
@@ -53,6 +54,11 @@ class MinesweeperMain:
         self.player_name = ""
         self.seed_str = ""
         self.topic_name = ""
+        self.i_am_master = True
+        self.num_of_players = 1
+
+    def game_init(self):
+        self.num_of_players = 1
 
     def open_opening_window(self):  # TODO: add comments
         # Create an instance of the HighScore class
@@ -78,12 +84,12 @@ class MinesweeperMain:
         seed.pack()
 
         def start_new_game():
+            self.game_init()
             board_size_str = board_size.get()
             size_index = int(board_size_str)
             self.seed_str = seed.get()
             name_str = name.get()
             if self.seed_str.isdigit() and name_str != "":
-                #global player_name, seed_str_for_cert
                 seed_int = int(self.seed_str)
                 self.player_name = name_str
                 opening_window.destroy()
@@ -153,28 +159,32 @@ class MinesweeperMain:
         # auto_offset_reset='earliest',   # TODO: not working in Windows Kafka - topic deletion crashes Kafka
         consumer = KafkaConsumer(TOPIC_NAME, value_deserializer=lambda data: json.loads(data.decode('utf-8')))
 
-        connected_players_num = 0
+        #connected_players_num = 0
         for message in consumer:
             # message.value contains dict with pressed tile data or 'quit' command
+            producer_id_from_kafka = message.value['producer_id']
+            from_local_producer = (producer_id_from_kafka == self.producer_id)
+            print("msg received")
             msg_type = message.value.get('msg_type')
             if msg_type == 'control':
                 msg = message.value.get('msg')
                 # checking run flag to close only local consumer
-                if msg == 'joining':  # TODO: send back welcome message (let joining player count current players)
+                if msg == 'joining' and not from_local_producer:  # TODO: send back welcome message (let joining player count current players)
                     #       * game_master can send board to joining players (instead of kafka)
-                    #print('joining')
-                    connected_players_num += 1
-                    # print('joining msg received, num of players is ', connected_players_num)
-                if msg == 'quit':  # TODO: change to message quiting
-                    #print('killing kafka consumer')
-                    connected_players_num -= 1
-                    # print('quitting msg received, num of players is ', connected_players_num)
-                    break
+                    self.num_of_players += 1
+                    print('joining msg received, num of players is ', self.num_of_players)
+                elif msg == 'quitting':
+                    if from_local_producer:
+                        print('killing local kafka consumer')
+                        break
+                    else:
+                        self.num_of_players -= 1
+                        print('quitting msg received, num of players is ', self.num_of_players)
 
             if msg_type == 'data':
                 pressed_tile_data_dict = message.value
-                producer_id_from_kafka = message.value['producer_id']
-                from_local_producer = (producer_id_from_kafka == self.producer_id)
+                #producer_id_from_kafka = message.value['producer_id']
+                #from_local_producer = (producer_id_from_kafka == self.producer_id)
 
                 self.action_queue.append([from_local_producer,
                                      pressed_tile_data_dict["tile_x"],
@@ -203,7 +213,7 @@ class MinesweeperMain:
                                                  action_right_released)
                     game_board.update_board_for_display(action_tile_x, action_tile_y)
 
-            game_board.display_game_board(self.display_new_button_icon)
+            game_board.display_game_board(self.display_new_button_icon, self.display_clock, self.num_of_players)
             """if game_board.add_score:
                 # TODO: fix bug - when pygame and highscore windows are open, if X is pressed in pygame win, all windows get stuck.
                 # TODO: Detect click outside window from display HS func
@@ -217,10 +227,10 @@ class MinesweeperMain:
                 # show_certificate_code(game_board)
                 game_board.game_over = True
 
-    def create_tile_data_dict(self, producer_id, tile_x, tile_y, left_released, right_released):
+    def create_tile_data_dict(self, tile_x, tile_y, left_released, right_released):
         # data preparation for sending to consumer (should be possible to convert to json)
         return {'msg_type': 'data',
-                'producer_id': producer_id,
+                'producer_id': self.producer_id,
                 'tile_x': tile_x,
                 'tile_y': tile_y,
                 'left_released': left_released,
@@ -259,7 +269,10 @@ class MinesweeperMain:
 
 
         if not self.game_started:  # send control msg "joining" only once
-            producer.send(self.topic_name, {'msg_type': 'control', 'msg': 'joining'})
+            producer.send(self.topic_name, {'producer_id': self.producer_id,
+                                            'msg_type': 'control',
+                                            'msg': 'joining'})
+            print("sending joining")
             producer.flush()
             self.game_started = True
 
@@ -274,9 +287,15 @@ class MinesweeperMain:
                 mouse_position = pygame.mouse.get_pos()
 
                 if event.type == pygame.QUIT:
-                    self.run = False
-                    producer.send(self.topic_name, {'msg_type': 'control', 'msg': 'quit'})
+                    #print("pygame QUIT event")
+                    producer.send(self.topic_name, {'producer_id': self.producer_id,
+                                                    'msg_type': 'control',
+                                                    'msg': 'quitting'})
                     producer.flush()
+                    #time.sleep(5)
+                    self.run = False
+                    #print("pygame QUIT event, after run=False")
+
 
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_LEFT:
@@ -309,7 +328,6 @@ class MinesweeperMain:
                     if event.button == self.RIGHT:
                         right_pressed = True
 
-
                 elif event.type == pygame.MOUSEBUTTONUP and (event.button == self.LEFT or event.button == self.RIGHT):
                     # detection of mouse button release, game state will be updated once mouse button is released
                     if left_pressed and not right_pressed:
@@ -340,8 +358,7 @@ class MinesweeperMain:
 
                         else:
                             # get_tile_data_dict generates 'data' msg
-                            producer_id = self.producer_id
-                            tile_data_dict = self.create_tile_data_dict(producer_id, tile_x, tile_y, left_released,
+                            tile_data_dict = self.create_tile_data_dict(tile_x, tile_y, left_released,
                                                                         right_released)
                             producer.send(self.topic_name, tile_data_dict)
                             producer.flush()
@@ -365,4 +382,5 @@ class MinesweeperMain:
 
 
 game = MinesweeperMain()
+print("game pointer: ", game)
 game.open_opening_window()
