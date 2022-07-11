@@ -1,2 +1,4 @@
+kafka-python==2.0.2
 numpy==1.22.3
 pygame==2.1.2
+pytictoc==1.5.2
