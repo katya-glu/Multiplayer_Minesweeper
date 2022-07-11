@@ -342,6 +342,31 @@ class Board:
             self.board_for_display[curr_tile_y][curr_tile_x] = self.board_array[curr_tile_y][curr_tile_x]
             self.update_radar_tile(curr_tile_x, curr_tile_y, self.numbers_color)
 
+
+    def update_board_for_display_new_player(self):
+        #Function updates whole board for display - done once when new player joins game
+        for display_tile_y in range(self.num_of_tiles_y):
+            for display_tile_x in range(self.num_of_tiles_x):
+                curr_tile_y = display_tile_y
+                curr_tile_x = display_tile_x
+
+                # updating flags
+                if self.flags_array[curr_tile_y][curr_tile_x] == self.FLAGGED:
+                    self.board_for_display[curr_tile_y][curr_tile_x] = self.TILE_FLAG
+
+                # updating mines, in case of losing
+                elif self.hit_mine and self.board_array[curr_tile_y][curr_tile_x] == self.TILE_MINE:
+                    self.board_for_display[curr_tile_y][curr_tile_x] = self.board_array[curr_tile_y][curr_tile_x]
+
+                # updating blocks (hidden tiles)
+                elif self.shown_array[curr_tile_y][curr_tile_x] == self.HIDDEN:
+                    self.board_for_display[curr_tile_y][curr_tile_x] = self.TILE_BLOCKED
+
+                # updating numbers
+                else:  # tile has been opened
+                    self.board_for_display[curr_tile_y][curr_tile_x] = self.board_array[curr_tile_y][curr_tile_x]
+
+
     def update_finished_board_for_display(self):    # TODO: update radar surface, rename func
         # func is called when player enters valid certificate (he finished the game previously)
         self.board_for_display = self.neighbours_array + self.mines_array * self.TILE_FLAG

@@ -7,6 +7,7 @@ import pygame
 import time
 import numpy as np
 import threading
+from datetime import datetime
 from kafka import KafkaConsumer
 from kafka import KafkaProducer
 #from kafka.admin import KafkaAdminClient                  # used for deleting a topic (not supported by Win-Kafka
@@ -18,9 +19,9 @@ pygame.init()
 
 class MinesweeperMain:
     # board size constants
-    num_of_tiles_x_small_board = 40
-    num_of_tiles_y_small_board = 40
-    num_of_mines_small_board   = 1
+    num_of_tiles_x_small_board = 10
+    num_of_tiles_y_small_board = 10
+    num_of_mines_small_board   = 10
 
     num_of_tiles_x_medium_board = 40
     num_of_tiles_y_medium_board = 40
@@ -34,6 +35,7 @@ class MinesweeperMain:
                     (num_of_tiles_x_medium_board, num_of_tiles_y_medium_board, num_of_mines_medium_board),
                     (num_of_tiles_x_large_board , num_of_tiles_y_large_board , num_of_mines_large_board )  ]
 
+
     # constants
     prod_id_max_val = (2 ** 32) - 1
     LEFT   = 1
@@ -46,16 +48,25 @@ class MinesweeperMain:
     tiles_hidden = True
     tiles_shown = False
 
+
     def __init__(self):
         self.action_queue = []
         self.run = True
         self.game_started = False
+        self.joining_time = time.time() # TODO: add logic for determining oldest master
+        self.kafka_server = 'localhost:9092'
         self.producer_id = 0
         self.player_name = ""
         self.seed_str = ""
         self.topic_name = ""
         self.i_am_master = True
         self.num_of_players = 1
+        self.send_board_to_new_player = False
+        self.received_all_board_parts = False   # TODO: add logic get board parts from kafka
+        self.num_of_received_board_parts = 0    # TODO: add logic get board parts from kafka
+        self.board_sync_needed = False
+        self.tiles_to_update_for_new_player_array = None    # array with 1 for shown or flag tile, 0 for hidden tile
+
 
     def game_init(self):
         self.num_of_players = 1
@@ -85,6 +96,7 @@ class MinesweeperMain:
 
         def start_new_game():
             self.game_init()
+            self.joining_time = time.time()
             board_size_str = board_size.get()
             size_index = int(board_size_str)
             self.seed_str = seed.get()
@@ -146,6 +158,7 @@ class MinesweeperMain:
         high_scores.add_new_high_score(score, size_index)
         game_board.add_score = False"""
 
+
     def show_certificate_code(self, game_board):
         certficate_window = Tk()
         certficate_window.title("Certificate")
@@ -153,6 +166,45 @@ class MinesweeperMain:
         certficate_label = Label(certficate_window, text=certificate_code)
         certficate_label.pack()
         certficate_window.mainloop()
+
+
+    def prepare_numpy_arrays_for_sending(self, game_board):     # returns list of two lists
+        shown_array_for_sending = game_board.shown_array.reshape([1, 100]).astype(dtype=bool)
+        flags_array_for_sending = game_board.flags_array.reshape([1, 100]).astype(dtype=bool)
+        shown_and_flags_array_for_sending = np.logical_or(shown_array_for_sending, flags_array_for_sending).tolist()
+        return shown_and_flags_array_for_sending
+
+
+    def send_welcome_msg(self, kafka_producer):
+        # master sends joining time for deciding
+        kafka_producer.send(self.topic_name, {'producer_id': self.producer_id,
+                                              'msg_type': 'control',
+                                              'msg': 'welcome',
+                                              'num_of_players': self.num_of_players,
+                                              'joining_time': self.joining_time})
+        kafka_producer.flush()
+
+
+    def send_game_board_to_new_player(self, kafka_producer, board_array):
+        kafka_producer.send(self.topic_name, {'producer_id': self.producer_id,
+                                              'msg_type': 'board_for_new_player',
+                                              'msg': 'board_for_new_player',
+                                              'board_array': board_array})
+        #print('sent board', board_array)
+        kafka_producer.flush()
+
+
+    def send_messages_to_new_players(self, kafka_producer, game_board):
+        # TODO: consider not closing the thread when stopping being master - to not open new thread in case of becoming master again
+        while self.run and self.i_am_master:
+            if self.send_board_to_new_player:
+                print('sending msg to new players')
+                self.send_board_to_new_player = False   # clear before sending msgs to avoid missing new player
+                self.send_welcome_msg(kafka_producer)
+                arrays_for_sending_list = self.prepare_numpy_arrays_for_sending(game_board)
+                self.send_game_board_to_new_player(kafka_producer, arrays_for_sending_list)
+
+            time.sleep(1) # sleep for 1 sec
 
     def kafka_consumer(self):
         TOPIC_NAME = self.topic_name
@@ -164,24 +216,30 @@ class MinesweeperMain:
             # message.value contains dict with pressed tile data or 'quit' command
             producer_id_from_kafka = message.value['producer_id']
             from_local_producer = (producer_id_from_kafka == self.producer_id)
-            print("msg received")
             msg_type = message.value.get('msg_type')
             if msg_type == 'control':
                 msg = message.value.get('msg')
                 # checking run flag to close only local consumer
-                if msg == 'joining' and not from_local_producer:  # TODO: send back welcome message (let joining player count current players)
+                if msg == 'joining' and not from_local_producer:
                     #       * game_master can send board to joining players (instead of kafka)
                     self.num_of_players += 1
                     print('joining msg received, num of players is ', self.num_of_players)
+
+                    if self.i_am_master:    # master player sends board data to new players
+                        self.send_board_to_new_player = True
+                if msg == 'welcome':
+                    print("welcome msg received")
+                    num_of_players_msg = message.value.get('num_of_players')  # num of players received from game master
+                    self.num_of_players = num_of_players_msg
                 elif msg == 'quitting':
                     if from_local_producer:
                         print('killing local kafka consumer')
-                        break
+                        break   # don't delete, important for correct num_of_players
                     else:
                         self.num_of_players -= 1
                         print('quitting msg received, num of players is ', self.num_of_players)
 
-            if msg_type == 'data':
+            elif msg_type == 'data':
                 pressed_tile_data_dict = message.value
                 #producer_id_from_kafka = message.value['producer_id']
                 #from_local_producer = (producer_id_from_kafka == self.producer_id)
@@ -193,12 +251,40 @@ class MinesweeperMain:
                                      pressed_tile_data_dict["right_released"]])
                 print(self.action_queue)
 
+            elif msg_type == 'board_for_new_player':
+                if not self.received_all_board_parts:
+                    shown_and_flags_list_for_new_player = message.value
+                    shown_and_flags_array_for_new_player = np.asarray(shown_and_flags_list_for_new_player['board_array'])
+                    self.tiles_to_update_for_new_player_array = np.reshape(shown_and_flags_array_for_new_player, [10, 10]).astype(dtype=np.uint8)
+                    print("board received", self.tiles_to_update_for_new_player_array)
+
+                    self.board_sync_needed = True
+                else:
+                    continue
+
+
+    def synchronize_board_for_new_player(self, game_board):
+        self.board_sync_needed = False
+        self.received_all_board_parts = True    # only one part at this point
+        flags_array_for_new_player = np.logical_and(self.tiles_to_update_for_new_player_array, game_board.mines_array) #TODO find better name
+        shown_array_for_new_player = np.logical_and(self.tiles_to_update_for_new_player_array, np.logical_not(game_board.mines_array))
+        game_board.flags_array = np.logical_or(game_board.flags_array, flags_array_for_new_player)
+        game_board.shown_array = np.logical_or(game_board.shown_array, shown_array_for_new_player)
+        game_board.update_board_for_display_new_player()
+
+        #self.shown_and_flags_array_for_new_player = None   # TODO: find a way to free memory
+
     def event_consumer(self, game_board):
         kafka_consumer_thread = threading.Thread(target=self.kafka_consumer)
         kafka_consumer_thread.start()
 
         while self.run:
-            if len(self.action_queue) != 0:
+            if self.board_sync_needed:
+                print('entering self.board_sync_needed')
+                #sync_thread = threading.Thread(target=self.synchronize_board_for_new_player, args=[game_board])
+                #sync_thread.start()
+                self.synchronize_board_for_new_player(game_board)  # TODO: display sync message
+            elif len(self.action_queue) != 0:
                 [from_local_producer, action_tile_x, action_tile_y, action_left_released, action_right_released] = \
                     self.action_queue.pop(0)
                 print("pop from action queue")
@@ -227,6 +313,7 @@ class MinesweeperMain:
                 # show_certificate_code(game_board)
                 game_board.game_over = True
 
+
     def create_tile_data_dict(self, tile_x, tile_y, left_released, right_released):
         # data preparation for sending to consumer (should be possible to convert to json)
         return {'msg_type': 'data',
@@ -236,8 +323,9 @@ class MinesweeperMain:
                 'left_released': left_released,
                 'right_released': right_released}
 
+
     def main(self, size_index, seed, tiles_hidden):  # TODO: add comments
-        # print("main start, threads: {}".format( threading.active_count() ))
+        print("main start, threads: {}".format( threading.active_count() ))
         self.producer_id = random.randint(0,
                                      self.prod_id_max_val)  # needs to come before random seed, to get unique producer_id
 
@@ -257,15 +345,20 @@ class MinesweeperMain:
         # kafka vars
         # each seed (seed == board setup) has its own topic, to pass messages only between prod/cons of this seed
         self.topic_name = str(seed)
-        kafka_server = 'localhost:9092'
+
 
         # starting consumer thread for kafka use
         consumer_thread = threading.Thread(target=self.event_consumer, args=[game_board])
         consumer_thread.start()
 
         # start kafka producer
-        producer = KafkaProducer(bootstrap_servers=kafka_server,
+        producer = KafkaProducer(bootstrap_servers=self.kafka_server,
                                  value_serializer=lambda data: json.dumps(data).encode('utf-8'))
+
+        # start thread for game master to check for new players
+        if self.i_am_master:
+            master_thread = threading.Thread(target=self.send_messages_to_new_players, args=[producer, game_board])
+            master_thread.start()
 
 
         if not self.game_started:  # send control msg "joining" only once
