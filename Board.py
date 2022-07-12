@@ -353,18 +353,25 @@ class Board:
                 # updating flags
                 if self.flags_array[curr_tile_y][curr_tile_x] == self.FLAGGED:
                     self.board_for_display[curr_tile_y][curr_tile_x] = self.TILE_FLAG
+                    self.update_radar_tile(curr_tile_x, curr_tile_y, self.flag_color)
+                    self.closed_tiles_num -= 1
 
                 # updating mines, in case of losing
                 elif self.hit_mine and self.board_array[curr_tile_y][curr_tile_x] == self.TILE_MINE:
                     self.board_for_display[curr_tile_y][curr_tile_x] = self.board_array[curr_tile_y][curr_tile_x]
+                    self.update_radar_tile(curr_tile_x, curr_tile_y, self.mine_color)
+                    self.closed_tiles_num -= 1
 
                 # updating blocks (hidden tiles)
                 elif self.shown_array[curr_tile_y][curr_tile_x] == self.HIDDEN:
                     self.board_for_display[curr_tile_y][curr_tile_x] = self.TILE_BLOCKED
+                    self.update_radar_tile(curr_tile_x, curr_tile_y, self.block_color)
 
                 # updating numbers
                 else:  # tile has been opened
                     self.board_for_display[curr_tile_y][curr_tile_x] = self.board_array[curr_tile_y][curr_tile_x]
+                    self.update_radar_tile(curr_tile_x, curr_tile_y, self.numbers_color)
+                    self.closed_tiles_num -= 1
 
 
     def update_finished_board_for_display(self):    # TODO: update radar surface, rename func

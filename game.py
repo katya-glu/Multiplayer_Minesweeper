@@ -50,26 +50,29 @@ class MinesweeperMain:
 
 
     def __init__(self):
+        self.game_init()
         self.action_queue = []
-        self.run = True
-        self.game_started = False
-        self.joining_time = time.time() # TODO: add logic for determining oldest master
         self.kafka_server = 'localhost:9092'
         self.producer_id = 0
         self.player_name = ""
         self.seed_str = ""
         self.topic_name = ""
-        self.i_am_master = True
-        self.num_of_players = 1
-        self.send_board_to_new_player = False
-        self.received_all_board_parts = False   # TODO: add logic get board parts from kafka
-        self.num_of_received_board_parts = 0    # TODO: add logic get board parts from kafka
-        self.board_sync_needed = False
         self.tiles_to_update_for_new_player_array = None    # array with 1 for shown or flag tile, 0 for hidden tile
 
 
     def game_init(self):
+        self.size_index = 0
         self.num_of_players = 1
+        self.run = True
+        self.game_started = False
+        self.joining_time = time.time()
+        self.i_am_master = True
+        self.num_of_players = 1
+        self.send_board_to_new_player = False
+        #self.received_all_board_parts = False  # TODO: add logic get board parts from kafka
+        #self.num_of_received_board_parts = 0  # TODO: add logic get board parts from kafka
+        self.board_sync_needed = False
+        self.earliest_joining_time_of_received_board = self.joining_time
 
     def open_opening_window(self):  # TODO: add comments
         # Create an instance of the HighScore class
@@ -96,16 +99,16 @@ class MinesweeperMain:
 
         def start_new_game():
             self.game_init()
-            self.joining_time = time.time()
+            #self.joining_time = time.time()
             board_size_str = board_size.get()
-            size_index = int(board_size_str)
+            self.size_index = int(board_size_str)
             self.seed_str = seed.get()
             name_str = name.get()
             if self.seed_str.isdigit() and name_str != "":
                 seed_int = int(self.seed_str)
                 self.player_name = name_str
                 opening_window.destroy()
-                self.main(size_index, seed_int, self.tiles_hidden)
+                self.main(seed_int, self.tiles_hidden)
                 self.open_opening_window()
             elif name_str == "":
                 messagebox.showwarning("Invalid input", "Invalid input, please enter your name")
@@ -120,9 +123,9 @@ class MinesweeperMain:
             if is_valid_certificate(cert_str):
                 cert_int = int(cert_str)
                 board_size_str = board_size.get()
-                size_index = int(board_size_str)
+                self.size_index = int(board_size_str)
                 opening_window.destroy()
-                self.main(size_index, cert_int, self.tiles_shown)
+                self.main(cert_int, self.tiles_shown)
                 self.open_opening_window()
 
         # TODO: consider adding multiplayer high-scores
@@ -153,9 +156,9 @@ class MinesweeperMain:
         opening_window.protocol("WM_DELETE_WINDOW", on_closing)
         opening_window.mainloop()
 
-    """def add_high_score(self, game_board, score, size_index):
+    """def add_high_score(self, game_board, score, self.size_index):
         high_scores = HighScore(False, 10, [10, 5], [True, False], "high_scores.pkl")
-        high_scores.add_new_high_score(score, size_index)
+        high_scores.add_new_high_score(score, self.size_index)
         game_board.add_score = False"""
 
 
@@ -168,9 +171,16 @@ class MinesweeperMain:
         certficate_window.mainloop()
 
 
+    def calculate_array_shape_for_sending(self):
+        num_of_tiles_x = self.board_info[self.size_index][0]
+        num_of_tiles_y = self.board_info[self.size_index][1]
+        return [1, num_of_tiles_x * num_of_tiles_y]
+
+
     def prepare_numpy_arrays_for_sending(self, game_board):     # returns list of two lists
-        shown_array_for_sending = game_board.shown_array.reshape([1, 100]).astype(dtype=bool)
-        flags_array_for_sending = game_board.flags_array.reshape([1, 100]).astype(dtype=bool)
+        array_shape_for_sending = self.calculate_array_shape_for_sending()
+        shown_array_for_sending = game_board.shown_array.reshape(array_shape_for_sending).astype(dtype=bool)
+        flags_array_for_sending = game_board.flags_array.reshape(array_shape_for_sending).astype(dtype=bool)
         shown_and_flags_array_for_sending = np.logical_or(shown_array_for_sending, flags_array_for_sending).tolist()
         return shown_and_flags_array_for_sending
 
@@ -189,7 +199,8 @@ class MinesweeperMain:
         kafka_producer.send(self.topic_name, {'producer_id': self.producer_id,
                                               'msg_type': 'board_for_new_player',
                                               'msg': 'board_for_new_player',
-                                              'board_array': board_array})
+                                              'board_array': board_array,
+                                              'joining_time': self.joining_time})
         #print('sent board', board_array)
         kafka_producer.flush()
 
@@ -217,33 +228,44 @@ class MinesweeperMain:
             producer_id_from_kafka = message.value['producer_id']
             from_local_producer = (producer_id_from_kafka == self.producer_id)
             msg_type = message.value.get('msg_type')
+            earlier_joining_time_than_msg = True
             if msg_type == 'control':
                 msg = message.value.get('msg')
                 # checking run flag to close only local consumer
                 if msg == 'joining' and not from_local_producer:
                     #       * game_master can send board to joining players (instead of kafka)
                     self.num_of_players += 1
-                    print('joining msg received, num of players is ', self.num_of_players)
+                    #print('joining msg received, num of players is ', self.num_of_players)
 
                     if self.i_am_master:    # master player sends board data to new players
                         self.send_board_to_new_player = True
                 if msg == 'welcome':
-                    print("welcome msg received")
+                    joining_time_msg = message.value.get('joining_time')
+
+                    # person who joined earlier will be the master (for sending already opened board to new joiners)
+                    if joining_time_msg < self.joining_time:
+                        earlier_joining_time_than_msg = False
+                        self.i_am_master = False
+
+                    # if two people joined at the same time, lower producer_id will remain master
+                    elif joining_time_msg == self.joining_time:
+                        producer_id_msg = message.value.get('producer_id')
+                        if producer_id_msg < self.producer_id:
+                            self.i_am_master = False
+
                     num_of_players_msg = message.value.get('num_of_players')  # num of players received from game master
                     self.num_of_players = num_of_players_msg
+                    print("Am I master? ", self.i_am_master)
                 elif msg == 'quitting':
                     if from_local_producer:
-                        print('killing local kafka consumer')
+                        #print('killing local kafka consumer')
                         break   # don't delete, important for correct num_of_players
                     else:
                         self.num_of_players -= 1
-                        print('quitting msg received, num of players is ', self.num_of_players)
+                        #print('quitting msg received, num of players is ', self.num_of_players)
 
             elif msg_type == 'data':
                 pressed_tile_data_dict = message.value
-                #producer_id_from_kafka = message.value['producer_id']
-                #from_local_producer = (producer_id_from_kafka == self.producer_id)
-
                 self.action_queue.append([from_local_producer,
                                      pressed_tile_data_dict["tile_x"],
                                      pressed_tile_data_dict["tile_y"],
@@ -252,21 +274,25 @@ class MinesweeperMain:
                 print(self.action_queue)
 
             elif msg_type == 'board_for_new_player':
-                if not self.received_all_board_parts:
-                    shown_and_flags_list_for_new_player = message.value
-                    shown_and_flags_array_for_new_player = np.asarray(shown_and_flags_list_for_new_player['board_array'])
-                    self.tiles_to_update_for_new_player_array = np.reshape(shown_and_flags_array_for_new_player, [10, 10]).astype(dtype=np.uint8)
-                    print("board received", self.tiles_to_update_for_new_player_array)
-
-                    self.board_sync_needed = True
-                else:
-                    continue
+                if not from_local_producer:
+                    joining_time_msg = message.value.get('joining_time')
+                    # user updates his board if a message arrives with "better" board, from master with earlier joining time
+                    if joining_time_msg < self.earliest_joining_time_of_received_board:
+                        self.earliest_joining_time_of_received_board = joining_time_msg
+                        shown_and_flags_list_for_new_player = message.value
+                        shown_and_flags_array_for_new_player = np.asarray(shown_and_flags_list_for_new_player['board_array'])
+                        num_of_tiles_x = self.board_info[self.size_index][0]
+                        num_of_tiles_y = self.board_info[self.size_index][1]
+                        self.tiles_to_update_for_new_player_array = np.reshape(shown_and_flags_array_for_new_player,
+                                                                               [num_of_tiles_y, num_of_tiles_x]).astype(dtype=np.uint8)
+                        self.board_sync_needed = True
+                    else:
+                        continue
 
 
     def synchronize_board_for_new_player(self, game_board):
         self.board_sync_needed = False
-        self.received_all_board_parts = True    # only one part at this point
-        flags_array_for_new_player = np.logical_and(self.tiles_to_update_for_new_player_array, game_board.mines_array) #TODO find better name
+        flags_array_for_new_player = np.logical_and(self.tiles_to_update_for_new_player_array, game_board.mines_array)
         shown_array_for_new_player = np.logical_and(self.tiles_to_update_for_new_player_array, np.logical_not(game_board.mines_array))
         game_board.flags_array = np.logical_or(game_board.flags_array, flags_array_for_new_player)
         game_board.shown_array = np.logical_or(game_board.shown_array, shown_array_for_new_player)
@@ -281,8 +307,6 @@ class MinesweeperMain:
         while self.run:
             if self.board_sync_needed:
                 print('entering self.board_sync_needed')
-                #sync_thread = threading.Thread(target=self.synchronize_board_for_new_player, args=[game_board])
-                #sync_thread.start()
                 self.synchronize_board_for_new_player(game_board)  # TODO: display sync message
             elif len(self.action_queue) != 0:
                 [from_local_producer, action_tile_x, action_tile_y, action_left_released, action_right_released] = \
@@ -324,14 +348,14 @@ class MinesweeperMain:
                 'right_released': right_released}
 
 
-    def main(self, size_index, seed, tiles_hidden):  # TODO: add comments
+    def main(self, seed, tiles_hidden):  # TODO: add comments
         print("main start, threads: {}".format( threading.active_count() ))
         self.producer_id = random.randint(0,
                                      self.prod_id_max_val)  # needs to come before random seed, to get unique producer_id
 
         np.random.seed(seed)  # random_seed generates a specific board setup for all users who enter this seed
-        (num_of_tiles_x, num_of_tiles_y, num_of_mines) = self.board_info[size_index]
-        game_board = Board(size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines, tiles_hidden)
+        (num_of_tiles_x, num_of_tiles_y, num_of_mines) = self.board_info[self.size_index]
+        game_board = Board(self.size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines, tiles_hidden)
         game_board.gen_random_mines_array()  # TODO: consider turning game_board into class attribute
         game_board.count_num_of_touching_mines()
 
@@ -380,12 +404,10 @@ class MinesweeperMain:
                 mouse_position = pygame.mouse.get_pos()
 
                 if event.type == pygame.QUIT:
-                    #print("pygame QUIT event")
                     producer.send(self.topic_name, {'producer_id': self.producer_id,
                                                     'msg_type': 'control',
                                                     'msg': 'quitting'})
                     producer.flush()
-                    #time.sleep(5)
                     self.run = False
                     #print("pygame QUIT event, after run=False")
 
