@@ -47,6 +47,7 @@ class MinesweeperMain:
     display_clock = False
     tiles_hidden = True
     tiles_shown = False
+    i_am_new_master_val = 100
 
 
     def __init__(self):
@@ -67,12 +68,16 @@ class MinesweeperMain:
         self.game_started = False
         self.joining_time = time.time()
         self.i_am_master = True
+        self.potential_master = False
+        self.new_master_needed = False
+        self.potential_master_counter = 0
         self.num_of_players = 1
         self.send_board_to_new_player = False
         #self.received_all_board_parts = False  # TODO: add logic get board parts from kafka
         #self.num_of_received_board_parts = 0  # TODO: add logic get board parts from kafka
         self.board_sync_needed = False
         self.earliest_joining_time_of_received_board = self.joining_time
+        self.timer_started = False
 
     def open_opening_window(self):  # TODO: add comments
         # Create an instance of the HighScore class
@@ -163,12 +168,12 @@ class MinesweeperMain:
 
 
     def show_certificate_code(self, game_board):
-        certficate_window = Tk()
-        certficate_window.title("Certificate")
+        certificate_window = Tk()
+        certificate_window.title("Certificate")
         certificate_code = "{},{},{}".format(str(game_board.score), self.seed_str, self.player_name)
-        certficate_label = Label(certficate_window, text=certificate_code)
-        certficate_label.pack()
-        certficate_window.mainloop()
+        certificate_label = Label(certificate_window, text=certificate_code)
+        certificate_label.pack()
+        certificate_window.mainloop()
 
 
     def calculate_array_shape_for_sending(self):
@@ -186,7 +191,7 @@ class MinesweeperMain:
 
 
     def send_welcome_msg(self, kafka_producer):
-        # master sends joining time for deciding
+        # master sends joining time for deciding who is better master
         kafka_producer.send(self.topic_name, {'producer_id': self.producer_id,
                                               'msg_type': 'control',
                                               'msg': 'welcome',
@@ -205,30 +210,63 @@ class MinesweeperMain:
         kafka_producer.flush()
 
 
-    def send_messages_to_new_players(self, kafka_producer, game_board):
+    def send_new_master_msg(self, kafka_producer):
+        # msg is sent after master has left to decide who is the new master
+        kafka_producer.send(self.topic_name, {'producer_id': self.producer_id,
+                                              'msg_type': 'control',
+                                              'msg': 'choosing_new_master',
+                                              'joining_time': self.joining_time})
+        kafka_producer.flush()
+
+
+    def send_master_messages(self, kafka_producer, game_board):
         # TODO: consider not closing the thread when stopping being master - to not open new thread in case of becoming master again
-        while self.run and self.i_am_master:
-            if self.send_board_to_new_player:
+        while self.run:
+            if self.i_am_master and self.send_board_to_new_player:  # send msg to new players
                 print('sending msg to new players')
                 self.send_board_to_new_player = False   # clear before sending msgs to avoid missing new player
                 self.send_welcome_msg(kafka_producer)
                 arrays_for_sending_list = self.prepare_numpy_arrays_for_sending(game_board)
                 self.send_game_board_to_new_player(kafka_producer, arrays_for_sending_list)
 
+            elif self.new_master_needed: # master has left and new master needs to be chosen
+                self.send_new_master_msg(kafka_producer)
+                self.new_master_needed = False
+
             time.sleep(1) # sleep for 1 sec
+
+
+    def decide_whether_i_am_master(self, message, potential_master_decision):
+        joining_time_msg = message.value.get('joining_time')
+
+        # person who joined earlier will be the master (for sending already opened board to new joiners)
+        # or potential master for choosing new master after master has left
+        if joining_time_msg < self.joining_time:
+            if potential_master_decision:
+                self.potential_master = False
+            else:   # decision who is original master (not after master has left)
+                self.i_am_master = False
+
+        # if two people joined at the same time, lower producer_id will remain master/potential master
+        elif joining_time_msg == self.joining_time:
+            producer_id_msg = message.value.get('producer_id')
+            if producer_id_msg < self.producer_id:
+                if potential_master_decision:
+                    self.potential_master = False
+                else:   # decision who is original master (not after master has left)
+                    self.i_am_master = False
+
 
     def kafka_consumer(self):
         TOPIC_NAME = self.topic_name
         # auto_offset_reset='earliest',   # TODO: not working in Windows Kafka - topic deletion crashes Kafka
         consumer = KafkaConsumer(TOPIC_NAME, value_deserializer=lambda data: json.loads(data.decode('utf-8')))
 
-        #connected_players_num = 0
         for message in consumer:
             # message.value contains dict with pressed tile data or 'quit' command
             producer_id_from_kafka = message.value['producer_id']
             from_local_producer = (producer_id_from_kafka == self.producer_id)
             msg_type = message.value.get('msg_type')
-            earlier_joining_time_than_msg = True
             if msg_type == 'control':
                 msg = message.value.get('msg')
                 # checking run flag to close only local consumer
@@ -237,40 +275,37 @@ class MinesweeperMain:
                     self.num_of_players += 1
                     #print('joining msg received, num of players is ', self.num_of_players)
 
-                    if self.i_am_master:    # master player sends board data to new players
+                    if self.i_am_master:    # master player sends board data to new players TODO: change to put flag anyway, even if not master
                         self.send_board_to_new_player = True
+
                 if msg == 'welcome':
-                    joining_time_msg = message.value.get('joining_time')
+                    self.decide_whether_i_am_master(message, potential_master_decision=False)
+                    print("I am Master: ", self.i_am_master)
 
-                    # person who joined earlier will be the master (for sending already opened board to new joiners)
-                    if joining_time_msg < self.joining_time:
-                        earlier_joining_time_than_msg = False
-                        self.i_am_master = False
+                    self.num_of_players = message.value.get('num_of_players')  # num of players received from game master
 
-                    # if two people joined at the same time, lower producer_id will remain master
-                    elif joining_time_msg == self.joining_time:
-                        producer_id_msg = message.value.get('producer_id')
-                        if producer_id_msg < self.producer_id:
-                            self.i_am_master = False
-
-                    num_of_players_msg = message.value.get('num_of_players')  # num of players received from game master
-                    self.num_of_players = num_of_players_msg
-                    print("Am I master? ", self.i_am_master)
                 elif msg == 'quitting':
+                    i_am_master_msg = message.value.get('i_am_master')
                     if from_local_producer:
                         #print('killing local kafka consumer')
                         break   # don't delete, important for correct num_of_players
                     else:
                         self.num_of_players -= 1
                         #print('quitting msg received, num of players is ', self.num_of_players)
+                        if i_am_master_msg and not from_local_producer:
+                            self.new_master_needed = True
+                            self.potential_master = True
+
+                elif msg == 'choosing_new_master':
+                    self.decide_whether_i_am_master(message, potential_master_decision=True)
+
+
 
             elif msg_type == 'data':
                 pressed_tile_data_dict = message.value
                 self.action_queue.append([from_local_producer,
-                                     pressed_tile_data_dict["tile_x"],
-                                     pressed_tile_data_dict["tile_y"],
-                                     pressed_tile_data_dict["left_released"],
-                                     pressed_tile_data_dict["right_released"]])
+                                          pressed_tile_data_dict["tile_x"], pressed_tile_data_dict["tile_y"],
+                                          pressed_tile_data_dict["left_released"], pressed_tile_data_dict["right_released"]])
                 print(self.action_queue)
 
             elif msg_type == 'board_for_new_player':
@@ -305,13 +340,37 @@ class MinesweeperMain:
         kafka_consumer_thread.start()
 
         while self.run:
+            if self.potential_master:
+                if not self.timer_started:
+                    print("reset timer")
+                    t1 = time.perf_counter()
+                    self.timer_started = True
+                self.potential_master_counter += 1
+                if self.potential_master_counter == self.i_am_new_master_val:
+                    # enough time has passed to decide that I am the new master (compared self.joining_time to all other
+                    # players, and self.joining_time is earliest)
+                    self.i_am_master = self.potential_master
+                    self.potential_master = False
+                    self.potential_master_counter = 0
+                    t2 = time.perf_counter()
+                    elapsed_time = t2 - t1
+                    #t1 = 0
+                    print("I am new Master: ", self.i_am_master)
+                    print("Elapsed time: ", elapsed_time)
+                    self.timer_started = False
+            else:
+                if self.timer_started:
+                    self.timer_started = False
+
+
             if self.board_sync_needed:
                 print('entering self.board_sync_needed')
                 self.synchronize_board_for_new_player(game_board)  # TODO: display sync message
-            elif len(self.action_queue) != 0:
+
+            elif len(self.action_queue) != 0:   # TODO: consider changing to if instead of elif
                 [from_local_producer, action_tile_x, action_tile_y, action_left_released, action_right_released] = \
                     self.action_queue.pop(0)
-                print("pop from action queue")
+                #print("pop from action queue")
                 # game state is updated according to the pressed button
                 if (action_left_released or action_right_released):
                     if not game_board.game_started and action_left_released and not action_right_released:
@@ -368,7 +427,7 @@ class MinesweeperMain:
 
         # kafka vars
         # each seed (seed == board setup) has its own topic, to pass messages only between prod/cons of this seed
-        self.topic_name = str(seed)
+        self.topic_name = "{}-{}".format(str(seed), self.size_index)
 
 
         # starting consumer thread for kafka use
@@ -380,9 +439,8 @@ class MinesweeperMain:
                                  value_serializer=lambda data: json.dumps(data).encode('utf-8'))
 
         # start thread for game master to check for new players
-        if self.i_am_master:
-            master_thread = threading.Thread(target=self.send_messages_to_new_players, args=[producer, game_board])
-            master_thread.start()
+        master_thread = threading.Thread(target=self.send_master_messages, args=[producer, game_board])
+        master_thread.start()
 
 
         if not self.game_started:  # send control msg "joining" only once
@@ -406,7 +464,8 @@ class MinesweeperMain:
                 if event.type == pygame.QUIT:
                     producer.send(self.topic_name, {'producer_id': self.producer_id,
                                                     'msg_type': 'control',
-                                                    'msg': 'quitting'})
+                                                    'msg': 'quitting',
+                                                    'i_am_master': self.i_am_master})
                     producer.flush()
                     self.run = False
                     #print("pygame QUIT event, after run=False")
