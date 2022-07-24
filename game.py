@@ -11,7 +11,7 @@ from datetime import datetime
 from kafka import KafkaConsumer
 from kafka import KafkaProducer
 #from kafka.admin import KafkaAdminClient                  # used for deleting a topic (not supported by Win-Kafka
-#from kafka.errors import (UnknownTopicOrPartitionError)   # used for deleting a topic (not supported by Win-Kafka
+from kafka.errors import (NoBrokersAvailable, UnknownTopicOrPartitionError)   # used for deleting a topic (not supported by Win-Kafka
 import json
 #from pytictoc import TicToc                               # used to evaluate performance
 pygame.init()
@@ -260,7 +260,16 @@ class MinesweeperMain:
     def kafka_consumer(self):
         TOPIC_NAME = self.topic_name
         # auto_offset_reset='earliest',   # TODO: not working in Windows Kafka - topic deletion crashes Kafka
-        consumer = KafkaConsumer(TOPIC_NAME, value_deserializer=lambda data: json.loads(data.decode('utf-8')))
+        try:
+            consumer = KafkaConsumer(TOPIC_NAME, value_deserializer=lambda data: json.loads(data.decode('utf-8')))
+        except NoBrokersAvailable:
+            consumer = []
+            print("Please start zookeeper and kafka server")
+            self.run = False
+        except Exception as e:
+            print("General server error")
+            print(e)
+            self.run = False
 
         for message in consumer:
             # message.value contains dict with pressed tile data or 'quit' command
@@ -429,116 +438,126 @@ class MinesweeperMain:
         # each seed (seed == board setup) has its own topic, to pass messages only between prod/cons of this seed
         self.topic_name = "{}-{}".format(str(seed), self.size_index)
 
+        try:    # TODO: refactor to shorter "try"
+            # starting consumer thread for kafka use
+            consumer_thread = threading.Thread(target=self.event_consumer, args=[game_board])
+            consumer_thread.start()
 
-        # starting consumer thread for kafka use
-        consumer_thread = threading.Thread(target=self.event_consumer, args=[game_board])
-        consumer_thread.start()
+            # start kafka producer
+            producer = KafkaProducer(bootstrap_servers=self.kafka_server,
+                                     value_serializer=lambda data: json.dumps(data).encode('utf-8'))
 
-        # start kafka producer
-        producer = KafkaProducer(bootstrap_servers=self.kafka_server,
-                                 value_serializer=lambda data: json.dumps(data).encode('utf-8'))
-
-        # start thread for game master to check for new players
-        master_thread = threading.Thread(target=self.send_master_messages, args=[producer, game_board])
-        master_thread.start()
-
-
-        if not self.game_started:  # send control msg "joining" only once
-            producer.send(self.topic_name, {'producer_id': self.producer_id,
-                                            'msg_type': 'control',
-                                            'msg': 'joining'})
-            print("sending joining")
-            producer.flush()
-            self.game_started = True
-
-        while self.run:
-            left_released = False
-            right_released = False
-
-            if game_board.timeout:  # timeout freezes game if mine was pressed/wrong flag
-                game_board.dec_timeout_counter()
-
-            for event in pygame.event.get():
-                mouse_position = pygame.mouse.get_pos()
-
-                if event.type == pygame.QUIT:
-                    producer.send(self.topic_name, {'producer_id': self.producer_id,
-                                                    'msg_type': 'control',
-                                                    'msg': 'quitting',
-                                                    'i_am_master': self.i_am_master})
-                    producer.flush()
-                    self.run = False
-                    #print("pygame QUIT event, after run=False")
+            # start thread for game master to check for new players
+            master_thread = threading.Thread(target=self.send_master_messages, args=[producer, game_board])
+            master_thread.start()
 
 
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_LEFT:
-                        game_board.update_window_location(-1, 0)
-                    if event.key == pygame.K_RIGHT:
-                        game_board.update_window_location(1, 0)
-                    if event.key == pygame.K_UP:
-                        game_board.update_window_location(0, -1)
-                    if event.key == pygame.K_DOWN:
-                        game_board.update_window_location(0, 1)
+            if not self.game_started:  # send control msg "joining" only once
+                producer.send(self.topic_name, {'producer_id': self.producer_id,
+                                                'msg_type': 'control',
+                                                'msg': 'joining'})
+                print("sending joining")
+                producer.flush()
+                self.game_started = True
 
-                # new game button pressed
-                if self.display_new_button_icon and event.type == pygame.MOUSEBUTTONDOWN and event.button == self.LEFT and \
-                        game_board.is_mouse_over_new_game_button(mouse_position):
-                    game_board.board_init(self.tiles_hidden)
-                    game_board.gen_random_mines_array()
-                    game_board.count_num_of_touching_mines()
-                    left_pressed = False
-                    right_pressed = False
+            while self.run:
+                left_released = False
+                right_released = False
 
-                # detection of click on radar
-                if event.type == pygame.MOUSEBUTTONDOWN and event.button == self.LEFT and \
-                        game_board.is_mouse_over_radar(mouse_position):
-                    game_board.radar_pixel_xy_to_new_window_loc(mouse_position)
+                if game_board.timeout:  # timeout freezes game if mine was pressed/wrong flag
+                    game_board.dec_timeout_counter()
 
-                # detection of mouse button press
-                elif event.type == pygame.MOUSEBUTTONDOWN and (event.button == self.LEFT or event.button == self.RIGHT):
-                    if event.button == self.LEFT:
-                        left_pressed = True
-                    if event.button == self.RIGHT:
-                        right_pressed = True
+                for event in pygame.event.get():
+                    mouse_position = pygame.mouse.get_pos()
 
-                elif event.type == pygame.MOUSEBUTTONUP and (event.button == self.LEFT or event.button == self.RIGHT):
-                    # detection of mouse button release, game state will be updated once mouse button is released
-                    if left_pressed and not right_pressed:
-                        left_released = True
-                    if right_pressed and not left_pressed:
-                        right_released = True
-                    if right_pressed and left_pressed:
-                        left_released = True
-                        right_released = True
+                    if event.type == pygame.QUIT:
+                        producer.send(self.topic_name, {'producer_id': self.producer_id,
+                                                        'msg_type': 'control',
+                                                        'msg': 'quitting',
+                                                        'i_am_master': self.i_am_master})
+                        producer.flush()
+                        self.run = False
+                        #print("pygame QUIT event, after run=False")
 
-                    pixel_x, pixel_y = event.pos
-                    tile_x, tile_y = game_board.pixel_xy_to_tile_xy(pixel_x, pixel_y)
 
-                    # send to consumers when not in hit_mine freeze
-                    if game_board.is_mouse_over_window(mouse_position) and not game_board.timeout and \
-                            game_board.is_valid_input(tile_x, tile_y, left_released, right_released):
-                        # wrong left click (on mine)
-                        if game_board.is_left_click_on_mine(tile_x, tile_y, left_released, right_released):
-                            self.action_queue.append([True, tile_x, tile_y, left_released,
-                                                      right_released])  # 0th index - from local producer
-                            game_board.start_timeout(tile_x, tile_y, game_board.MINE_ERROR)
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_LEFT:
+                            game_board.update_window_location(-1, 0)
+                        if event.key == pygame.K_RIGHT:
+                            game_board.update_window_location(1, 0)
+                        if event.key == pygame.K_UP:
+                            game_board.update_window_location(0, -1)
+                        if event.key == pygame.K_DOWN:
+                            game_board.update_window_location(0, 1)
 
-                        # wrong right click (tile without mine was flagged)
-                        elif game_board.is_wrong_right_click(tile_x, tile_y, left_released, right_released):
-                            self.action_queue.append([True, tile_x, tile_y, left_released,
-                                                      right_released])  # 0th index - from local producer
-                            game_board.start_timeout(tile_x, tile_y, game_board.FLAG_ERROR)
+                    # new game button pressed
+                    if self.display_new_button_icon and event.type == pygame.MOUSEBUTTONDOWN and event.button == self.LEFT and \
+                            game_board.is_mouse_over_new_game_button(mouse_position):
+                        game_board.board_init(self.tiles_hidden)
+                        game_board.gen_random_mines_array()
+                        game_board.count_num_of_touching_mines()
+                        left_pressed = False
+                        right_pressed = False
 
-                        else:
-                            # get_tile_data_dict generates 'data' msg
-                            tile_data_dict = self.create_tile_data_dict(tile_x, tile_y, left_released,
-                                                                        right_released)
-                            producer.send(self.topic_name, tile_data_dict)
-                            producer.flush()
+                    # detection of click on radar
+                    if event.type == pygame.MOUSEBUTTONDOWN and event.button == self.LEFT and \
+                            game_board.is_mouse_over_radar(mouse_position):
+                        game_board.radar_pixel_xy_to_new_window_loc(mouse_position)
 
-                    left_pressed = False
-                    right_pressed = False
+                    # detection of mouse button press
+                    elif event.type == pygame.MOUSEBUTTONDOWN and (event.button == self.LEFT or event.button == self.RIGHT):
+                        if event.button == self.LEFT:
+                            left_pressed = True
+                        if event.button == self.RIGHT:
+                            right_pressed = True
+
+                    elif event.type == pygame.MOUSEBUTTONUP and (event.button == self.LEFT or event.button == self.RIGHT):
+                        # detection of mouse button release, game state will be updated once mouse button is released
+                        if left_pressed and not right_pressed:
+                            left_released = True
+                        if right_pressed and not left_pressed:
+                            right_released = True
+                        if right_pressed and left_pressed:
+                            left_released = True
+                            right_released = True
+
+                        pixel_x, pixel_y = event.pos
+                        tile_x, tile_y = game_board.pixel_xy_to_tile_xy(pixel_x, pixel_y)
+
+                        # send to consumers when not in hit_mine freeze
+                        if game_board.is_mouse_over_window(mouse_position) and not game_board.timeout and \
+                                game_board.is_valid_input(tile_x, tile_y, left_released, right_released):
+                            # wrong left click (on mine)
+                            if game_board.is_left_click_on_mine(tile_x, tile_y, left_released, right_released):
+                                self.action_queue.append([True, tile_x, tile_y, left_released,
+                                                          right_released])  # 0th index - from local producer
+                                game_board.start_timeout(tile_x, tile_y, game_board.MINE_ERROR)
+
+                            # wrong right click (tile without mine was flagged)
+                            elif game_board.is_wrong_right_click(tile_x, tile_y, left_released, right_released):
+                                self.action_queue.append([True, tile_x, tile_y, left_released,
+                                                          right_released])  # 0th index - from local producer
+                                game_board.start_timeout(tile_x, tile_y, game_board.FLAG_ERROR)
+
+                            else:
+                                # get_tile_data_dict generates 'data' msg
+                                tile_data_dict = self.create_tile_data_dict(tile_x, tile_y, left_released,
+                                                                            right_released)
+                                producer.send(self.topic_name, tile_data_dict)
+                                producer.flush()
+
+                        left_pressed = False
+                        right_pressed = False
+
+        except NoBrokersAvailable:
+            print("Please start zookeeper and kafka server")
+            self.run = False
+
+        except Exception as e:
+            print("General server error")
+            print(e)
+            self.run = False
+
 
         time.sleep(1)  # wait 1 sec to avoid thread crash on pygame command
         pygame.quit()
