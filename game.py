@@ -14,6 +14,8 @@ from kafka import KafkaProducer
 from kafka.errors import (NoBrokersAvailable, UnknownTopicOrPartitionError)   # used for deleting a topic (not supported by Win-Kafka
 import json
 #from pytictoc import TicToc                               # used to evaluate performance
+from certificate_logic import *
+import sys
 pygame.init()
 
 
@@ -27,8 +29,8 @@ class MinesweeperMain:
     num_of_tiles_y_medium_board = 40
     num_of_mines_medium_board   = int(0.2 * num_of_tiles_x_medium_board * num_of_tiles_y_medium_board) # 20% mines
 
-    num_of_tiles_x_large_board = 500
-    num_of_tiles_y_large_board = 500
+    num_of_tiles_x_large_board = 300
+    num_of_tiles_y_large_board = 300
     num_of_mines_large_board   = int(0.2 * num_of_tiles_x_large_board * num_of_tiles_y_large_board)    # 20% mines
 
     board_info = [  (num_of_tiles_x_small_board , num_of_tiles_y_small_board , num_of_mines_small_board ),
@@ -45,12 +47,13 @@ class MinesweeperMain:
     LARGE  = 2
     display_new_button_icon = False     # no new game button multiplayer
     display_clock = False
-    tiles_hidden = True
-    tiles_shown = False
-    i_am_new_master_val = 100
+    certificate_mode = True
+    game_mode = False
+    master_update_timeout = 1.5   # maximum expected time to receive potential master messages from all players [sec]
 
 
     def __init__(self):
+        self.is_certificate = self.game_mode  # default is game_mode
         self.game_init()
         self.action_queue = []
         self.kafka_server = 'localhost:9092'
@@ -60,21 +63,21 @@ class MinesweeperMain:
         self.topic_name = ""
         self.tiles_to_update_for_new_player_array = None    # array with 1 for shown or flag tile, 0 for hidden tile
 
-
     def game_init(self):
         self.size_index = 0
         self.num_of_players = 1
         self.run = True
         self.game_started = False
         self.joining_time = time.time()
-        self.i_am_master = True
+        if self.is_certificate:  # certificate mode
+            self.i_am_master = False
+        else:               # game mode
+            self.i_am_master = True
         self.potential_master = False
         self.new_master_needed = False
         self.potential_master_counter = 0
         self.num_of_players = 1
         self.send_board_to_new_player = False
-        #self.received_all_board_parts = False  # TODO: add logic get board parts from kafka
-        #self.num_of_received_board_parts = 0  # TODO: add logic get board parts from kafka
         self.board_sync_needed = False
         self.earliest_joining_time_of_received_board = self.joining_time
         self.timer_started = False
@@ -103,6 +106,7 @@ class MinesweeperMain:
         seed.pack()
 
         def start_new_game():
+            self.is_certificate = self.game_mode
             self.game_init()
             #self.joining_time = time.time()
             board_size_str = board_size.get()
@@ -113,24 +117,24 @@ class MinesweeperMain:
                 seed_int = int(self.seed_str)
                 self.player_name = name_str
                 opening_window.destroy()
-                self.main(seed_int, self.tiles_hidden)
+                self.main(seed_int, self.game_mode)
                 self.open_opening_window()
             elif name_str == "":
                 messagebox.showwarning("Invalid input", "Invalid input, please enter your name")
             else:
                 messagebox.showwarning("Invalid input", "Invalid input, please enter a whole number")
 
-        def is_valid_certificate(cert_str):
-            return cert_str.isdigit()  # TODO: add function to parse cert
 
         def process_certificate():
+            self.is_certificate = self.certificate_mode
+            self.game_init()
             cert_str = certificate.get()
             if is_valid_certificate(cert_str):
                 cert_int = int(cert_str)
                 board_size_str = board_size.get()
                 self.size_index = int(board_size_str)
                 opening_window.destroy()
-                self.main(cert_int, self.tiles_shown)
+                self.main(cert_int, self.certificate_mode)
                 self.open_opening_window()
 
         # TODO: consider adding multiplayer high-scores
@@ -167,15 +171,6 @@ class MinesweeperMain:
         game_board.add_score = False"""
 
 
-    def show_certificate_code(self, game_board):
-        certificate_window = Tk()
-        certificate_window.title("Certificate")
-        certificate_code = "{},{},{}".format(str(game_board.score), self.seed_str, self.player_name)
-        certificate_label = Label(certificate_window, text=certificate_code)
-        certificate_label.pack()
-        certificate_window.mainloop()
-
-
     def calculate_array_shape_for_sending(self):
         num_of_tiles_x = self.board_info[self.size_index][0]
         num_of_tiles_y = self.board_info[self.size_index][1]
@@ -187,7 +182,71 @@ class MinesweeperMain:
         shown_array_for_sending = game_board.shown_array.reshape(array_shape_for_sending).astype(dtype=bool)
         flags_array_for_sending = game_board.flags_array.reshape(array_shape_for_sending).astype(dtype=bool)
         shown_and_flags_array_for_sending = np.logical_or(shown_array_for_sending, flags_array_for_sending).tolist()
+        print("shown_and_flags_array_for_sending length: ", len(shown_and_flags_array_for_sending[0]))
+        print("shown_and_flags_array_for_sending first item type: ", type(shown_and_flags_array_for_sending[0][0]))
+
+
+        #print("Memory size of numpy array in bytes:", flags_array_for_sending.size * flags_array_for_sending.itemsize)
+        #print("Size of shown_and_flags_array_for_sending: " + str(sys.getsizeof(shown_and_flags_array_for_sending)) + "bytes")
         return shown_and_flags_array_for_sending
+
+
+    def start_kafka_consumer(self):
+        # auto_offset_reset='earliest',   # TODO: not working in Windows Kafka - topic deletion crashes Kafka
+        try:
+            consumer = KafkaConsumer(self.topic_name, value_deserializer=lambda data: json.loads(data.decode('utf-8')))
+        except NoBrokersAvailable:
+            consumer = []
+            print("Consumer not available. Please start zookeeper and kafka server")
+            self.run = False
+        except Exception as e:
+            print("General server error")
+            print(e)
+            self.run = False
+
+        return consumer
+
+
+    def start_kafka_producer(self):
+        try:
+            # start kafka producer
+            producer = KafkaProducer(bootstrap_servers=self.kafka_server,
+                                     value_serializer=lambda data: json.dumps(data).encode('utf-8'))
+            print("producer", producer)
+            return producer # TODO: check what is the best practice here, maybe init to None
+
+        except NoBrokersAvailable:
+            print("Producer not available. Please start zookeeper and kafka server")
+            self.run = False
+        except Exception as e:
+            print("General server error")
+            print(e)
+            self.run = False
+
+
+    def send_joining_message(self, kafka_producer):
+        if kafka_producer is not None:
+            kafka_producer.send(self.topic_name, {'producer_id': self.producer_id,
+                                                  'msg_type': 'control',
+                                                  'msg': 'joining'})
+            print("sending joining")
+            kafka_producer.flush()
+
+
+    def send_quitting_message(self, kafka_producer):
+        if kafka_producer is not None:
+            kafka_producer.send(self.topic_name, {'producer_id': self.producer_id,
+                                            'msg_type': 'control',
+                                            'msg': 'quitting',
+                                            'i_am_master': self.i_am_master})
+            kafka_producer.flush()
+
+
+    def send_tile_data_message(self, kafka_producer, tile_x, tile_y, left_released, right_released):
+        if kafka_producer is not None:
+            tile_data_dict = self.create_tile_data_dict(tile_x, tile_y, left_released, right_released)
+            kafka_producer.send(self.topic_name, tile_data_dict)
+            kafka_producer.flush()
 
 
     def send_welcome_msg(self, kafka_producer):
@@ -206,7 +265,7 @@ class MinesweeperMain:
                                               'msg': 'board_for_new_player',
                                               'board_array': board_array,
                                               'joining_time': self.joining_time})
-        #print('sent board', board_array)
+        #print('sent board')
         kafka_producer.flush()
 
 
@@ -228,6 +287,8 @@ class MinesweeperMain:
                 self.send_welcome_msg(kafka_producer)
                 arrays_for_sending_list = self.prepare_numpy_arrays_for_sending(game_board)
                 self.send_game_board_to_new_player(kafka_producer, arrays_for_sending_list)
+                print('board sent to new player')
+
 
             elif self.new_master_needed: # master has left and new master needs to be chosen
                 self.send_new_master_msg(kafka_producer)
@@ -258,24 +319,15 @@ class MinesweeperMain:
 
 
     def kafka_consumer(self):
-        TOPIC_NAME = self.topic_name
-        # auto_offset_reset='earliest',   # TODO: not working in Windows Kafka - topic deletion crashes Kafka
-        try:
-            consumer = KafkaConsumer(TOPIC_NAME, value_deserializer=lambda data: json.loads(data.decode('utf-8')))
-        except NoBrokersAvailable:
-            consumer = []
-            print("Please start zookeeper and kafka server")
-            self.run = False
-        except Exception as e:
-            print("General server error")
-            print(e)
-            self.run = False
+        consumer = self.start_kafka_consumer()
 
         for message in consumer:
             # message.value contains dict with pressed tile data or 'quit' command
             producer_id_from_kafka = message.value['producer_id']
             from_local_producer = (producer_id_from_kafka == self.producer_id)
             msg_type = message.value.get('msg_type')
+            print("message received, type: ", msg_type)
+
             if msg_type == 'control':
                 msg = message.value.get('msg')
                 # checking run flag to close only local consumer
@@ -308,8 +360,6 @@ class MinesweeperMain:
                 elif msg == 'choosing_new_master':
                     self.decide_whether_i_am_master(message, potential_master_decision=True)
 
-
-
             elif msg_type == 'data':
                 pressed_tile_data_dict = message.value
                 self.action_queue.append([from_local_producer,
@@ -318,6 +368,7 @@ class MinesweeperMain:
                 print(self.action_queue)
 
             elif msg_type == 'board_for_new_player':
+                print("board received from master")
                 if not from_local_producer:
                     joining_time_msg = message.value.get('joining_time')
                     # user updates his board if a message arrives with "better" board, from master with earlier joining time
@@ -342,31 +393,30 @@ class MinesweeperMain:
         game_board.shown_array = np.logical_or(game_board.shown_array, shown_array_for_new_player)
         game_board.update_board_for_display_new_player()
 
-        #self.shown_and_flags_array_for_new_player = None   # TODO: find a way to free memory
 
     def event_consumer(self, game_board):
-        kafka_consumer_thread = threading.Thread(target=self.kafka_consumer)
-        kafka_consumer_thread.start()
+        if not self.is_certificate: # game_mode
+            kafka_consumer_thread = threading.Thread(target=self.kafka_consumer)
+            kafka_consumer_thread.start()
 
         while self.run:
             if self.potential_master:
                 if not self.timer_started:
                     print("reset timer")
-                    t1 = time.perf_counter()
+                    timer_start_time = time.perf_counter()
                     self.timer_started = True
-                self.potential_master_counter += 1
-                if self.potential_master_counter == self.i_am_new_master_val:
-                    # enough time has passed to decide that I am the new master (compared self.joining_time to all other
-                    # players, and self.joining_time is earliest)
-                    self.i_am_master = self.potential_master
-                    self.potential_master = False
-                    self.potential_master_counter = 0
-                    t2 = time.perf_counter()
-                    elapsed_time = t2 - t1
-                    #t1 = 0
-                    print("I am new Master: ", self.i_am_master)
-                    print("Elapsed time: ", elapsed_time)
-                    self.timer_started = False
+                else:
+                    timer_end_time = time.perf_counter()
+                    elapsed_time = timer_end_time - timer_start_time
+                    if elapsed_time > self.master_update_timeout:
+                        # enough time has passed to decide that I am the new master (all messages received, no better master found)
+                        self.i_am_master = self.potential_master
+                        self.potential_master = False
+                        self.potential_master_counter = 0
+
+                        print("DBG: I am new Master: ", self.i_am_master)
+                        print("DBG: Elapsed time: ", elapsed_time)
+                        self.timer_started = False
             else:
                 if self.timer_started:
                     self.timer_started = False
@@ -376,7 +426,7 @@ class MinesweeperMain:
                 print('entering self.board_sync_needed')
                 self.synchronize_board_for_new_player(game_board)  # TODO: display sync message
 
-            elif len(self.action_queue) != 0:   # TODO: consider changing to if instead of elif
+            elif len(self.action_queue) != 0:
                 [from_local_producer, action_tile_x, action_tile_y, action_left_released, action_right_released] = \
                     self.action_queue.pop(0)
                 #print("pop from action queue")
@@ -392,10 +442,6 @@ class MinesweeperMain:
                     game_board.update_board_for_display(action_tile_x, action_tile_y)
 
             game_board.display_game_board(self.display_new_button_icon, self.display_clock, self.num_of_players)
-            """if game_board.add_score:
-                # TODO: fix bug - when pygame and highscore windows are open, if X is pressed in pygame win, all windows get stuck.
-                # TODO: Detect click outside window from display HS func
-                add_high_score(game_board, game_board.time, game_board.size_index)"""
             if game_board.timeout:
                 game_board.display_timeout_icon()
 
@@ -416,147 +462,122 @@ class MinesweeperMain:
                 'right_released': right_released}
 
 
-    def main(self, seed, tiles_hidden):  # TODO: add comments
+    def main(self, seed, certificate_mode):  # TODO: add comments
         print("main start, threads: {}".format( threading.active_count() ))
         self.producer_id = random.randint(0,
                                      self.prod_id_max_val)  # needs to come before random seed, to get unique producer_id
 
         np.random.seed(seed)  # random_seed generates a specific board setup for all users who enter this seed
         (num_of_tiles_x, num_of_tiles_y, num_of_mines) = self.board_info[self.size_index]
-        game_board = Board(self.size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines, tiles_hidden)
+        game_board = Board(self.size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines, certificate_mode)
         game_board.gen_random_mines_array()  # TODO: consider turning game_board into class attribute
         game_board.count_num_of_touching_mines()
 
-        if not tiles_hidden:
+        if certificate_mode:
             game_board.update_finished_board_for_display()
-        left_pressed = False
-        right_pressed = False
+        left_pressed, right_pressed = [False, False]
 
         self.run = True
 
         # kafka vars
-        # each seed (seed == board setup) has its own topic, to pass messages only between prod/cons of this seed
+        # each seed (seed == board setup) and board size has its own topic, to pass messages only between prod/cons of this seed
         self.topic_name = "{}-{}".format(str(seed), self.size_index)
 
-        try:    # TODO: refactor to shorter "try"
-            # starting consumer thread for kafka use
-            consumer_thread = threading.Thread(target=self.event_consumer, args=[game_board])
-            consumer_thread.start()
+        # starting consumer thread for kafka use
+        consumer_thread = threading.Thread(target=self.event_consumer, args=[game_board])
+        consumer_thread.start()
 
-            # start kafka producer
-            producer = KafkaProducer(bootstrap_servers=self.kafka_server,
-                                     value_serializer=lambda data: json.dumps(data).encode('utf-8'))
+        producer = None  # no producer needed in certificate_mode
+        if not self.is_certificate:     # start producer when in game_mode
+            producer = self.start_kafka_producer()
 
-            # start thread for game master to check for new players
-            master_thread = threading.Thread(target=self.send_master_messages, args=[producer, game_board])
-            master_thread.start()
-
+        if self.run:
+            if producer is not None:
+                # start thread for game master to send messages
+                master_thread = threading.Thread(target=self.send_master_messages, args=[producer, game_board])
+                master_thread.start()
 
             if not self.game_started:  # send control msg "joining" only once
-                producer.send(self.topic_name, {'producer_id': self.producer_id,
-                                                'msg_type': 'control',
-                                                'msg': 'joining'})
-                print("sending joining")
-                producer.flush()
+                self.send_joining_message(producer)
                 self.game_started = True
 
-            while self.run:
-                left_released = False
-                right_released = False
 
-                if game_board.timeout:  # timeout freezes game if mine was pressed/wrong flag
-                    game_board.dec_timeout_counter()
+        while self.run:
+            left_released, right_released = [False, False]
 
-                for event in pygame.event.get():
-                    mouse_position = pygame.mouse.get_pos()
+            if game_board.timeout:  # timeout freezes game if mine was pressed/wrong flag
+                game_board.dec_timeout_counter()
 
-                    if event.type == pygame.QUIT:
-                        producer.send(self.topic_name, {'producer_id': self.producer_id,
-                                                        'msg_type': 'control',
-                                                        'msg': 'quitting',
-                                                        'i_am_master': self.i_am_master})
-                        producer.flush()
-                        self.run = False
-                        #print("pygame QUIT event, after run=False")
+            for event in pygame.event.get():
+                mouse_position = pygame.mouse.get_pos()
+
+                if event.type == pygame.QUIT:
+                    self.send_quitting_message(producer)
+                    self.run = False
 
 
-                    if event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_LEFT:
-                            game_board.update_window_location(-1, 0)
-                        if event.key == pygame.K_RIGHT:
-                            game_board.update_window_location(1, 0)
-                        if event.key == pygame.K_UP:
-                            game_board.update_window_location(0, -1)
-                        if event.key == pygame.K_DOWN:
-                            game_board.update_window_location(0, 1)
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_LEFT:
+                        game_board.update_window_location(-1, 0)
+                    if event.key == pygame.K_RIGHT:
+                        game_board.update_window_location(1, 0)
+                    if event.key == pygame.K_UP:
+                        game_board.update_window_location(0, -1)
+                    if event.key == pygame.K_DOWN:
+                        game_board.update_window_location(0, 1)
 
-                    # new game button pressed
-                    if self.display_new_button_icon and event.type == pygame.MOUSEBUTTONDOWN and event.button == self.LEFT and \
-                            game_board.is_mouse_over_new_game_button(mouse_position):
-                        game_board.board_init(self.tiles_hidden)
-                        game_board.gen_random_mines_array()
-                        game_board.count_num_of_touching_mines()
-                        left_pressed = False
-                        right_pressed = False
+                # new game button pressed
+                if self.display_new_button_icon and event.type == pygame.MOUSEBUTTONDOWN and event.button == self.LEFT and \
+                        game_board.is_mouse_over_new_game_button(mouse_position):
+                    game_board.board_init(self.certificate_mode)
+                    game_board.gen_random_mines_array()
+                    game_board.count_num_of_touching_mines()
+                    left_pressed, right_pressed = [False, False]
 
-                    # detection of click on radar
-                    if event.type == pygame.MOUSEBUTTONDOWN and event.button == self.LEFT and \
-                            game_board.is_mouse_over_radar(mouse_position):
-                        game_board.radar_pixel_xy_to_new_window_loc(mouse_position)
+                # detection of click on radar
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == self.LEFT and \
+                        game_board.is_mouse_over_radar(mouse_position):
+                    game_board.radar_pixel_xy_to_new_window_loc(mouse_position)
 
-                    # detection of mouse button press
-                    elif event.type == pygame.MOUSEBUTTONDOWN and (event.button == self.LEFT or event.button == self.RIGHT):
-                        if event.button == self.LEFT:
-                            left_pressed = True
-                        if event.button == self.RIGHT:
-                            right_pressed = True
+                # detection of mouse button press
+                elif event.type == pygame.MOUSEBUTTONDOWN and (event.button == self.LEFT or event.button == self.RIGHT):
+                    if event.button == self.LEFT:
+                        left_pressed = True
+                    if event.button == self.RIGHT:
+                        right_pressed = True
 
-                    elif event.type == pygame.MOUSEBUTTONUP and (event.button == self.LEFT or event.button == self.RIGHT):
-                        # detection of mouse button release, game state will be updated once mouse button is released
-                        if left_pressed and not right_pressed:
-                            left_released = True
-                        if right_pressed and not left_pressed:
-                            right_released = True
-                        if right_pressed and left_pressed:
-                            left_released = True
-                            right_released = True
+                elif event.type == pygame.MOUSEBUTTONUP and (event.button == self.LEFT or event.button == self.RIGHT):
+                    # detection of mouse button release, game state will be updated once mouse button is released
+                    if left_pressed and not right_pressed:
+                        left_released = True
+                    if right_pressed and not left_pressed:
+                        right_released = True
+                    if right_pressed and left_pressed:
+                        left_released = True
+                        right_released = True
 
-                        pixel_x, pixel_y = event.pos
-                        tile_x, tile_y = game_board.pixel_xy_to_tile_xy(pixel_x, pixel_y)
+                    pixel_x, pixel_y = event.pos
+                    tile_x, tile_y = game_board.pixel_xy_to_tile_xy(pixel_x, pixel_y)
 
-                        # send to consumers when not in hit_mine freeze
-                        if game_board.is_mouse_over_window(mouse_position) and not game_board.timeout and \
-                                game_board.is_valid_input(tile_x, tile_y, left_released, right_released):
-                            # wrong left click (on mine)
-                            if game_board.is_left_click_on_mine(tile_x, tile_y, left_released, right_released):
-                                self.action_queue.append([True, tile_x, tile_y, left_released,
-                                                          right_released])  # 0th index - from local producer
-                                game_board.start_timeout(tile_x, tile_y, game_board.MINE_ERROR)
+                    # send to consumers when not in hit_mine freeze
+                    if game_board.is_mouse_over_window(mouse_position) and not game_board.timeout and \
+                            game_board.is_valid_input(tile_x, tile_y, left_released, right_released):
+                        # wrong left click (on mine)
+                        if game_board.is_left_click_on_mine(tile_x, tile_y, left_released, right_released):
+                            self.action_queue.append([True, tile_x, tile_y, left_released,
+                                                      right_released])  # 0th index - from local producer
+                            game_board.start_timeout(tile_x, tile_y, game_board.MINE_ERROR)
 
-                            # wrong right click (tile without mine was flagged)
-                            elif game_board.is_wrong_right_click(tile_x, tile_y, left_released, right_released):
-                                self.action_queue.append([True, tile_x, tile_y, left_released,
-                                                          right_released])  # 0th index - from local producer
-                                game_board.start_timeout(tile_x, tile_y, game_board.FLAG_ERROR)
+                        # wrong right click (tile without mine was flagged)
+                        elif game_board.is_wrong_right_click(tile_x, tile_y, left_released, right_released):
+                            self.action_queue.append([True, tile_x, tile_y, left_released,
+                                                      right_released])  # 0th index - from local producer
+                            game_board.start_timeout(tile_x, tile_y, game_board.FLAG_ERROR)
 
-                            else:
-                                # get_tile_data_dict generates 'data' msg
-                                tile_data_dict = self.create_tile_data_dict(tile_x, tile_y, left_released,
-                                                                            right_released)
-                                producer.send(self.topic_name, tile_data_dict)
-                                producer.flush()
+                        else:
+                            self.send_tile_data_message(producer, tile_x, tile_y, left_released, right_released)
 
-                        left_pressed = False
-                        right_pressed = False
-
-        except NoBrokersAvailable:
-            print("Please start zookeeper and kafka server")
-            self.run = False
-
-        except Exception as e:
-            print("General server error")
-            print(e)
-            self.run = False
+                    left_pressed, right_pressed = [False, False]
 
 
         time.sleep(1)  # wait 1 sec to avoid thread crash on pygame command

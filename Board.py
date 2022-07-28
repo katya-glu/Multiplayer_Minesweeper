@@ -63,7 +63,7 @@ class Board:
              pygame.image.load("mine.png"), pygame.image.load("block.png"), pygame.image.load("flagged.png"),
              pygame.image.load("new_game_unpressed.png"), pygame.image.load("mine_red.png")]
 
-    def __init__(self, size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines, tiles_hidden, tile_width=16, tile_height=16):
+    def __init__(self, size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines, certificate_mode, tile_width=16, tile_height=16):
         pygame.init()
         #self.size_index = size_index  # 0=small, 1=medium, 2=large
         self.num_of_tiles_x = num_of_tiles_x
@@ -107,10 +107,11 @@ class Board:
         self.canvas_pixel_width = 0
         self.canvas_pixel_height = 0
         self.canvas = self.canvas_init()
-        self.board_init(tiles_hidden)
+        self.board_init(certificate_mode)
+
 
     # noinspection PyAttributeOutsideInit
-    def board_init(self, tiles_hidden):
+    def board_init(self, certificate_mode):
         self.win = False
         self.hit_mine = False
         self.game_over = False
@@ -136,16 +137,18 @@ class Board:
 
         self.radar_surface.fill(self.block_color)
 
-        if tiles_hidden:
-            self.shown_array = np.zeros(self.board_shape, dtype=np.uint8)
-        else:
+        if certificate_mode:
             self.shown_array = np.ones(self.board_shape, dtype=np.uint8)
+        else:   # game_mode
+            self.shown_array = np.zeros(self.board_shape, dtype=np.uint8)
+
         self.flags_array = np.zeros(self.board_shape, dtype=np.uint8)
         self.mines_array = np.zeros(self.board_shape, dtype=np.uint8)
         self.neighbours_array = np.zeros(self.board_shape, dtype=np.uint8)
         self.board_array = np.zeros(self.board_shape, dtype=np.uint8)
         self.board_for_display = np.full(self.board_shape, self.TILE_BLOCKED, dtype=np.uint8)
         self.new_button_icon = self.tiles[self.NEW_GAME_BUTTON]
+
 
     def canvas_init(self):
         self.canvas_pixel_width = self.delta_from_left_x + self.window_width + self.radar_width_w_margins
@@ -155,6 +158,7 @@ class Board:
         pygame.display.set_caption("Multiplayer Minesweeper")
         return canvas
 
+
     def gen_random_mines_array(self):
         # function shuffles an array in order to randomly generate locations of mines in the array
         num_of_tiles = self.num_of_tiles_x * self.num_of_tiles_y
@@ -163,6 +167,7 @@ class Board:
         joined_array = np.concatenate((ones_array, zeros_array))
         np.random.shuffle(joined_array)
         self.mines_array = joined_array.reshape(self.board_shape).astype(np.uint8)
+
 
     def count_num_of_touching_mines(self):
         padded_mines_array = np.pad(self.mines_array, (1, 1))
@@ -194,6 +199,7 @@ class Board:
         tile_x = ((pixel_x - self.delta_from_left_x) // self.tile_width) + self.tile_offset_for_display_x
         tile_y = ((pixel_y - self.delta_from_top_y) // self.tile_height) + self.tile_offset_for_display_y
         return tile_x, tile_y
+
 
     def is_valid_input(self, tile_x, tile_y, left_click, right_click):   # should click be ignored or not
         # case1: left & right click is valid on open tile, when #adacent_flags == #adjacent_mines
@@ -258,6 +264,7 @@ class Board:
                                 opened_tiles_num += 1
         return opened_tiles_num
 
+
     def all_adjacent_mines_are_flagged_correctly(self, tile_x, tile_y):
         y_start = max(tile_y - 1, 0)
         y_end = min(tile_y + 2, self.num_of_tiles_y)
@@ -265,6 +272,7 @@ class Board:
         x_end = min(tile_x + 2, self.num_of_tiles_x)
         return (self.flags_array[y_start:y_end, x_start:x_end] ==
                 self.flags_array[y_start:y_end, x_start:x_end]).all()
+
 
     def update_game_state(self, from_local_producer, tile_x, tile_y, left_click, right_click):
         # function updates game state upon receiving valid input
@@ -374,9 +382,11 @@ class Board:
                     self.closed_tiles_num -= 1
 
 
-    def update_finished_board_for_display(self):    # TODO: update radar surface, rename func
+    def update_finished_board_for_display(self):
         # func is called when player enters valid certificate (he finished the game previously)
         self.board_for_display = self.neighbours_array + self.mines_array * self.TILE_FLAG
+        self.update_all_radar_tiles()
+
 
     def display_game_board(self, display_new_button_icon, display_clock, num_of_players):
         # background
@@ -437,6 +447,7 @@ class Board:
                             ((self.window_width - self.win_text.get_width()) // 2, self.delta_from_top_y +
                             (self.window_height - self.win_text.get_height()) // 2))
 
+
     def display_radar(self):
         # draw radar surface
         self.canvas.blit(self.radar_surface, (self.radar_start_pos_x, self.radar_start_pos_y))
@@ -460,10 +471,30 @@ class Board:
                          ((self.window_width - self.mistake_icon.get_width()) // 2, self.delta_from_top_y +
                           (self.window_height - self.mistake_icon.get_height()) // 2))
 
+
     def update_radar_tile(self, tile_x, tile_y, color):
         self.radar_surface.fill(color, (tile_x * self.radar_tile_size_px,
                                         tile_y * self.radar_tile_size_px,
                                         self.radar_tile_size_px, self.radar_tile_size_px))
+
+
+    def update_all_radar_tiles(self):
+        for display_tile_y in range(self.num_of_tiles_y):
+            for display_tile_x in range(self.num_of_tiles_x):
+                curr_tile_y = display_tile_y
+                curr_tile_x = display_tile_x
+
+                # updating flags
+                if self.board_for_display[curr_tile_y][curr_tile_x] == self.TILE_FLAG:
+                    self.update_radar_tile(curr_tile_x, curr_tile_y, self.flag_color)
+
+                # updating mines, in case of losing
+                elif self.hit_mine and self.board_for_display[curr_tile_y][curr_tile_x] == self.TILE_MINE:
+                    self.update_radar_tile(curr_tile_x, curr_tile_y, self.mine_color)
+
+                # updating numbers
+                else:  # tile has been opened
+                    self.update_radar_tile(curr_tile_x, curr_tile_y, self.numbers_color)
 
 
     def update_window_location(self, horizontal_displacement, vertical_displacement):
@@ -488,11 +519,13 @@ class Board:
     def update_score(self, points_to_update):
         self.score += points_to_update
 
+
     def start_timeout(self, tile_x, tile_y, error_type):
         self.timeout = True
         self.error_loc_x = tile_x
         self.error_loc_y = tile_y
         self.error_type = error_type
+
 
     def dec_timeout_counter(self):
         if self.timeout_counter > 0:
@@ -503,6 +536,7 @@ class Board:
             self.timeout = False
             self.close_opened_mine_or_flag_tile()
             print("timeout finished at ", datetime.now())
+
 
     def close_opened_mine_or_flag_tile(self):
         if self.error_type == self.MINE_ERROR:
@@ -529,20 +563,7 @@ class Board:
 
 
     def is_game_over(self):
-        """#zeros_array = np.zeros(self.board_shape, dtype=np.uint8)
-        #print(self.mines_array == zeros_array.all())
-        not_all_mines_zero = np.any((self.mines_array != 0))
-        if not_all_mines_zero and (self.flags_array == self.mines_array).all():
-            #self.game_over = True  # TODO: check if this is used, if not - remove
-            #font = pygame.font.SysFont("", 40)
-            #win_text = font.render("You win", True, (255, 0, 0))
-            #self.canvas.blit(win_text, ((self.canvas_pixel_width - win_text.get_width()) // 2, self.canvas_pixel_height // 2))
-            #if not self.win:
-                #self.win = True
-                #self.add_score = True
-            return True"""
         return (self.closed_tiles_num == 0)
-
 
 
     def is_mouse_over_new_game_button(self, mouse_position):
