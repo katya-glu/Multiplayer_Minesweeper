@@ -1,21 +1,14 @@
-from plot_high_score_class import HighScore
-from tkinter import *
 from tkinter import messagebox
 from Board import Board
 import random
 import pygame
 import time
-import numpy as np
 import threading
-from datetime import datetime
 from kafka import KafkaConsumer
 from kafka import KafkaProducer
-#from kafka.admin import KafkaAdminClient                  # used for deleting a topic (not supported by Win-Kafka
-from kafka.errors import (NoBrokersAvailable, UnknownTopicOrPartitionError)   # used for deleting a topic (not supported by Win-Kafka
-import json
-#from pytictoc import TicToc                               # used to evaluate performance
-from certificate_logic import *
-import sys
+from kafka.errors import (NoBrokersAvailable)
+from certificate import *
+from functools import partial
 pygame.init()
 
 
@@ -59,7 +52,7 @@ class MinesweeperMain:
         self.kafka_server = 'localhost:9092'
         self.producer_id = 0
         self.player_name = ""
-        self.seed_str = ""
+        self.game_number_str = ""
         self.topic_name = ""
         self.tiles_to_update_for_new_player_array = None    # array with 1 for shown or flag tile, 0 for hidden tile
 
@@ -82,10 +75,7 @@ class MinesweeperMain:
         self.earliest_joining_time_of_received_board = self.joining_time
         self.timer_started = False
 
-    def open_opening_window(self):  # TODO: add comments
-        # Create an instance of the HighScore class
-        high_scores = HighScore(True, 10, [10, 5], [True, False], "high_scores.pkl")
-
+    def open_opening_window(self):
         opening_window = Tk()
         opening_window.title("Opening window")
 
@@ -94,84 +84,78 @@ class MinesweeperMain:
         board_size.set(self.SMALL)
 
         for mode, size in MODES:
-            Radiobutton(opening_window, text=mode, variable=board_size, value=size).pack()
+            Radiobutton(opening_window, text=mode, variable=board_size, value=size).pack()  # radiobuttons for size choice
 
         name_description = Label(opening_window, text="Enter name: ")
         name_description.pack()
         name = Entry(opening_window, width=10)
         name.pack()
-        seed_description = Label(opening_window, text="Enter number: ")
-        seed_description.pack()
-        seed = Entry(opening_window, width=10)
-        seed.pack()
+        # players need to enter the same game number to play on the same board
+        game_number_description = Label(opening_window, text="Enter game number: ")
+        game_number_description.pack()
+        game_number = Entry(opening_window, width=10)
+        game_number.pack()
 
-        def start_new_game():
-            self.is_certificate = self.game_mode
-            self.game_init()
-            #self.joining_time = time.time()
-            board_size_str = board_size.get()
-            self.size_index = int(board_size_str)
-            self.seed_str = seed.get()
-            name_str = name.get()
-            if self.seed_str.isdigit() and name_str != "":
-                seed_int = int(self.seed_str)
-                self.player_name = name_str
-                opening_window.destroy()
-                self.main(seed_int, self.game_mode)
-                self.open_opening_window()
-            elif name_str == "":
-                messagebox.showwarning("Invalid input", "Invalid input, please enter your name")
-            else:
-                messagebox.showwarning("Invalid input", "Invalid input, please enter a whole number")
+        start_game_button = Button(opening_window, text="Start game", command=partial(self.start_new_game,
+                                                                                      opening_window, board_size, game_number,
+                                                                                      name))
+        start_game_button.pack()
 
+        # entry box for players to enter certificate, to view opened board and score
+        certificate_description = Label(opening_window, text="Enter certificate: ")
+        certificate_description.pack()
+        certificate = Entry(opening_window, width=10)
+        certificate.pack()  #TODO: add space between certificate entry box and button
 
-        def process_certificate():
-            self.is_certificate = self.certificate_mode
-            self.game_init()
-            cert_str = certificate.get()
-            if is_valid_certificate(cert_str):
-                cert_int = int(cert_str)
-                board_size_str = board_size.get()
-                self.size_index = int(board_size_str)
-                opening_window.destroy()
-                self.main(cert_int, self.certificate_mode)
-                self.open_opening_window()
-
-        # TODO: consider adding multiplayer high-scores
-        """def open_high_scores():
-            if not high_scores.is_window_open():
-                high_scores.load_scores_from_file()
-                high_scores.display_high_scores_window()"""
+        enter_certificate_button = Button(opening_window, text="Process certificate", command=partial(self.process_certificate,
+                                                                                      opening_window, board_size, certificate))
+        enter_certificate_button.pack()
 
         def on_closing():
             if messagebox.askokcancel("Quit", "Do you want to quit?"):
                 opening_window.destroy()
 
-        start_game_button = Button(opening_window, text="Start game", command=start_new_game)
-        start_game_button.pack()
-
-        certificate_description = Label(opening_window, text="Enter certificate: ")
-        certificate_description.pack()
-        certificate = Entry(opening_window, width=10)
-        certificate.pack()
-
-        enter_certificate_button = Button(opening_window, text="Process certificate", command=process_certificate)
-        enter_certificate_button.pack()
-
-        # TODO: consider adding multiplayer high-scores (collect score from all current players)
-        # high_scores_button = Button(opening_window, text="High scores", command=open_high_scores)
-        # high_scores_button.pack()
-
         opening_window.protocol("WM_DELETE_WINDOW", on_closing)
         opening_window.mainloop()
 
-    """def add_high_score(self, game_board, score, self.size_index):
-        high_scores = HighScore(False, 10, [10, 5], [True, False], "high_scores.pkl")
-        high_scores.add_new_high_score(score, self.size_index)
-        game_board.add_score = False"""
+
+    def start_new_game(self, opening_window, board_size, game_number, name):
+        # function is called when pressing on start game button in opening window
+        self.is_certificate = self.game_mode
+        self.game_init()
+        # self.joining_time = time.time()
+        board_size_str = board_size.get()
+        self.size_index = int(board_size_str)
+        self.game_number_str = game_number.get()
+        name_str = name.get()
+        if self.game_number_str.isdigit() and name_str != "":
+            game_number_int = int(self.game_number_str)
+            self.player_name = name_str
+            opening_window.destroy()
+            self.main(game_number_int, self.game_mode)
+            self.open_opening_window()
+        elif name_str == "":
+            messagebox.showwarning("Invalid input", "Invalid input, please enter your name")
+        else:
+            messagebox.showwarning("Invalid input", "Invalid input, please enter a whole number")
+
+
+    def process_certificate(self, opening_window, board_size, certificate):
+        # function is called when pressing on process certificate button in opening window
+        self.is_certificate = self.certificate_mode
+        self.game_init()
+        cert_str = certificate.get()
+        if is_valid_certificate(cert_str):  # TODO: add logic that gets score from certificate code and displays it
+            cert_int = int(cert_str)
+            board_size_str = board_size.get()
+            self.size_index = int(board_size_str)
+            opening_window.destroy()
+            self.main(cert_int, self.certificate_mode)
+            self.open_opening_window()
 
 
     def calculate_array_shape_for_sending(self):
+        # one dimensional array is sent, shape should be [1, total num of tiles]
         num_of_tiles_x = self.board_info[self.size_index][0]
         num_of_tiles_y = self.board_info[self.size_index][1]
         return [1, num_of_tiles_x * num_of_tiles_y]
@@ -182,17 +166,11 @@ class MinesweeperMain:
         shown_array_for_sending = game_board.shown_array.reshape(array_shape_for_sending).astype(dtype=bool)
         flags_array_for_sending = game_board.flags_array.reshape(array_shape_for_sending).astype(dtype=bool)
         shown_and_flags_array_for_sending = np.logical_or(shown_array_for_sending, flags_array_for_sending).tolist()
-        print("shown_and_flags_array_for_sending length: ", len(shown_and_flags_array_for_sending[0]))
-        print("shown_and_flags_array_for_sending first item type: ", type(shown_and_flags_array_for_sending[0][0]))
 
-
-        #print("Memory size of numpy array in bytes:", flags_array_for_sending.size * flags_array_for_sending.itemsize)
-        #print("Size of shown_and_flags_array_for_sending: " + str(sys.getsizeof(shown_and_flags_array_for_sending)) + "bytes")
         return shown_and_flags_array_for_sending
 
 
     def start_kafka_consumer(self):
-        # auto_offset_reset='earliest',   # TODO: not working in Windows Kafka - topic deletion crashes Kafka
         try:
             consumer = KafkaConsumer(self.topic_name, value_deserializer=lambda data: json.loads(data.decode('utf-8')))
         except NoBrokersAvailable:
@@ -236,9 +214,9 @@ class MinesweeperMain:
     def send_quitting_message(self, kafka_producer):
         if kafka_producer is not None:
             kafka_producer.send(self.topic_name, {'producer_id': self.producer_id,
-                                            'msg_type': 'control',
-                                            'msg': 'quitting',
-                                            'i_am_master': self.i_am_master})
+                                                  'msg_type': 'control',
+                                                  'msg': 'quitting',
+                                                  'i_am_master': self.i_am_master})
             kafka_producer.flush()
 
 
@@ -279,7 +257,6 @@ class MinesweeperMain:
 
 
     def send_master_messages(self, kafka_producer, game_board):
-        # TODO: consider not closing the thread when stopping being master - to not open new thread in case of becoming master again
         while self.run:
             if self.i_am_master and self.send_board_to_new_player:  # send msg to new players
                 print('sending msg to new players')
@@ -326,7 +303,7 @@ class MinesweeperMain:
             producer_id_from_kafka = message.value['producer_id']
             from_local_producer = (producer_id_from_kafka == self.producer_id)
             msg_type = message.value.get('msg_type')
-            print("message received, type: ", msg_type)
+            #print("message received, type: ", msg_type)
 
             if msg_type == 'control':
                 msg = message.value.get('msg')
@@ -334,10 +311,10 @@ class MinesweeperMain:
                 if msg == 'joining' and not from_local_producer:
                     #       * game_master can send board to joining players (instead of kafka)
                     self.num_of_players += 1
-                    #print('joining msg received, num of players is ', self.num_of_players)
 
-                    if self.i_am_master:    # master player sends board data to new players TODO: change to put flag anyway, even if not master
-                        self.send_board_to_new_player = True
+                    # send_board_to_new_player becomes true for all players to not miss new player that needs the board
+                    # when master leaves and new player joins before new master is chosen
+                    self.send_board_to_new_player = True
 
                 if msg == 'welcome':
                     self.decide_whether_i_am_master(message, potential_master_decision=False)
@@ -370,6 +347,9 @@ class MinesweeperMain:
             elif msg_type == 'board_for_new_player':
                 print("board received from master")
                 if not from_local_producer:
+                    if not self.i_am_master:
+                        self.send_board_to_new_player = False
+
                     joining_time_msg = message.value.get('joining_time')
                     # user updates his board if a message arrives with "better" board, from master with earlier joining time
                     if joining_time_msg < self.earliest_joining_time_of_received_board:
@@ -401,7 +381,7 @@ class MinesweeperMain:
 
         while self.run:
             if self.potential_master:
-                if not self.timer_started:
+                if not self.timer_started:  # start timer first time player becomes potential master
                     print("reset timer")
                     timer_start_time = time.perf_counter()
                     self.timer_started = True
@@ -417,14 +397,14 @@ class MinesweeperMain:
                         print("DBG: I am new Master: ", self.i_am_master)
                         print("DBG: Elapsed time: ", elapsed_time)
                         self.timer_started = False
-            else:
+            else:   # stop timer if decided that I am not potential master
                 if self.timer_started:
                     self.timer_started = False
 
 
             if self.board_sync_needed:
-                print('entering self.board_sync_needed')
-                self.synchronize_board_for_new_player(game_board)  # TODO: display sync message
+                print('DBG: entering self.board_sync_needed')
+                self.synchronize_board_for_new_player(game_board)
 
             elif len(self.action_queue) != 0:
                 [from_local_producer, action_tile_x, action_tile_y, action_left_released, action_right_released] = \
@@ -448,7 +428,7 @@ class MinesweeperMain:
             game_board.update_clock()
             pygame.display.update()
             if game_board.is_game_over() and not game_board.game_over:
-                # show_certificate_code(game_board)
+                show_certificate_code(game_board, self.game_number_str, self.player_name)
                 game_board.game_over = True
 
 
@@ -462,13 +442,14 @@ class MinesweeperMain:
                 'right_released': right_released}
 
 
-    def main(self, seed, certificate_mode):  # TODO: add comments
+    def main(self, game_number, certificate_mode):  # TODO: add comments
         print("main start, threads: {}".format( threading.active_count() ))
         self.producer_id = random.randint(0,
                                      self.prod_id_max_val)  # needs to come before random seed, to get unique producer_id
 
-        np.random.seed(seed)  # random_seed generates a specific board setup for all users who enter this seed
+        set_random_seed(game_number)
         (num_of_tiles_x, num_of_tiles_y, num_of_mines) = self.board_info[self.size_index]
+        # board init
         game_board = Board(self.size_index, num_of_tiles_x, num_of_tiles_y, num_of_mines, certificate_mode)
         game_board.gen_random_mines_array()  # TODO: consider turning game_board into class attribute
         game_board.count_num_of_touching_mines()
@@ -480,8 +461,8 @@ class MinesweeperMain:
         self.run = True
 
         # kafka vars
-        # each seed (seed == board setup) and board size has its own topic, to pass messages only between prod/cons of this seed
-        self.topic_name = "{}-{}".format(str(seed), self.size_index)
+        # each game_number and board size has its own topic, to pass messages only between prod/cons of this game_number
+        self.topic_name = "{}-{}".format(str(game_number), self.size_index)
 
         # starting consumer thread for kafka use
         consumer_thread = threading.Thread(target=self.event_consumer, args=[game_board])
@@ -501,7 +482,6 @@ class MinesweeperMain:
                 self.send_joining_message(producer)
                 self.game_started = True
 
-
         while self.run:
             left_released, right_released = [False, False]
 
@@ -515,8 +495,7 @@ class MinesweeperMain:
                     self.send_quitting_message(producer)
                     self.run = False
 
-
-                if event.type == pygame.KEYDOWN:
+                if event.type == pygame.KEYDOWN:    # moving window on larger game board
                     if event.key == pygame.K_LEFT:
                         game_board.update_window_location(-1, 0)
                     if event.key == pygame.K_RIGHT:
@@ -526,7 +505,7 @@ class MinesweeperMain:
                     if event.key == pygame.K_DOWN:
                         game_board.update_window_location(0, 1)
 
-                # new game button pressed
+                # new game button pressed (if enabled)
                 if self.display_new_button_icon and event.type == pygame.MOUSEBUTTONDOWN and event.button == self.LEFT and \
                         game_board.is_mouse_over_new_game_button(mouse_position):
                     game_board.board_init(self.certificate_mode)
@@ -546,8 +525,8 @@ class MinesweeperMain:
                     if event.button == self.RIGHT:
                         right_pressed = True
 
+                # detection of mouse button release, game state will be updated once mouse button is released
                 elif event.type == pygame.MOUSEBUTTONUP and (event.button == self.LEFT or event.button == self.RIGHT):
-                    # detection of mouse button release, game state will be updated once mouse button is released
                     if left_pressed and not right_pressed:
                         left_released = True
                     if right_pressed and not left_pressed:
@@ -579,22 +558,10 @@ class MinesweeperMain:
 
                     left_pressed, right_pressed = [False, False]
 
-
         time.sleep(1)  # wait 1 sec to avoid thread crash on pygame command
         pygame.quit()
-        """admin_client = KafkaAdminClient(bootstrap_servers=kafka_server)
-        #admin_client.delete_topics(topics=[topic_name])
-        try:
-            print("deleting topic: ", topic_name)
-            admin_client.delete_topics(topics=topic_name)
-            print("Topic Deleted Successfully")
-        except UnknownTopicOrPartitionError as e:
-            print("Topic Doesn't Exist")
-        except  Exception as e:
-            print(e)"""
         self.game_started = False
 
 
 game = MinesweeperMain()
-print("game pointer: ", game)
 game.open_opening_window()
